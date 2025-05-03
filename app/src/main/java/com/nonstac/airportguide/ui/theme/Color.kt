@@ -65,6 +65,8 @@ val NodeColorEntrance = Color(0xFF4CAF50) // Green
 val NodeColorGate = Color(0xFF2196F3) // Blue
 val NodeColorBathroom = Color(0xFFFF9800) // Orange
 val NodeColorExit = Color(0xFFE53935) // Red
+val NodeColorStair = Color(0xFF607D8B) // Grey
+val NodeColorConnection = Color(0xFF607D8B) // Grey
 val NodeColorCurrentLocation = VuelingBlue
 val NodeColorDestination = VuelingYellow
 val EdgeColorDefault = VuelingGray.copy(alpha = 0.5f)

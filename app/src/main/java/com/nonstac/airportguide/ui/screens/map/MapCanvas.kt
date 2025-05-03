@@ -282,5 +282,7 @@ private fun getNodeColor(type: NodeType): Color {
         NodeType.BATHROOM -> NodeColorBathroom
         NodeType.EMERGENCY_EXIT -> NodeColorExit
         NodeType.WAYPOINT -> NodeColorDefault
+        NodeType.STAIRS_ELEVATOR -> NodeColorStair
+        NodeType.CONNECTION -> NodeColorConnection
     }
 }

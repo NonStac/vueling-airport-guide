@@ -33,7 +33,7 @@ data class Node(
 )
 
 @Serializable
-enum class NodeType { ENTRANCE, GATE, BATHROOM, EMERGENCY_EXIT, WAYPOINT }
+enum class NodeType { ENTRANCE, GATE, BATHROOM, EMERGENCY_EXIT, WAYPOINT, STAIRS_ELEVATOR, CONNECTION }
 
 @Serializable
 data class Edge(
