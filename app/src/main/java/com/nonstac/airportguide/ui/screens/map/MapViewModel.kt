@@ -41,7 +41,11 @@ data class MapUiState(
         Manifest.permission.ACCESS_FINE_LOCATION to false,
         Manifest.permission.RECORD_AUDIO to false
     ),
-    val selectedNodeInfo: Node? = null
+    val selectedNodeInfo: Node? = null,
+
+    val selectableNodes: List<Node> = emptyList(),
+    val selectedSourceNodeId: String? = null,
+    val selectedDestinationNodeId: String? = null,
 )
 
 class MapViewModel(
@@ -79,8 +83,14 @@ class MapViewModel(
             mapRepository.getAirportMap(Constants.DEFAULT_AIRPORT_CODE)
                 .onSuccess { map ->
                     Log.d(TAG, "Map loaded: ${map.airportName}")
-                    mapNodesById = map.nodes.associateBy { node -> node.id } // Populate mapNodesById
-                    _uiState.update { it.copy(airportMap = map, isLoadingMap = false) }
+                    mapNodesById =
+                        map.nodes.associateBy { node -> node.id } // Populate mapNodesById
+                    _uiState.update {
+                        it.copy(
+                            airportMap = map,
+                            isLoadingMap = false,
+                            selectableNodes = map.nodes.sortedBy { node -> node.name })
+                    }
                     // requestInitialLocation() // Consider if you want location attempt here
                 }.onFailure { error ->
                     Log.e(TAG, "Failed to load map", error)
@@ -92,7 +102,10 @@ class MapViewModel(
             ticketRepository.getBoughtTickets(username)
                 .onSuccess { tickets ->
                     val relevantTicket = tickets.firstOrNull { it.status == TicketStatus.BOUGHT }
-                    Log.d(TAG, "Found relevant ticket: ${relevantTicket?.flightNumber}, Gate: ${relevantTicket?.gate}")
+                    Log.d(
+                        TAG,
+                        "Found relevant ticket: ${relevantTicket?.flightNumber}, Gate: ${relevantTicket?.gate}"
+                    )
                     _uiState.update { it.copy(userFlightGate = relevantTicket?.gate) }
                 }.onFailure { error ->
                     Log.w(TAG, "Could not fetch user tickets/gate: ${error.message}")
@@ -161,6 +174,38 @@ class MapViewModel(
         // No specific action needed here for RECORD_AUDIO denial, handled by interruptSpeechAndListen
     }
 
+    fun updateSelectedSourceNode(nodeId: String?) {
+        _uiState.update {
+            it.copy(selectedSourceNodeId = nodeId)
+        }
+    }
+
+    fun updateSelectedDestinationNode(nodeId: String?) {
+        _uiState.update {
+            it.copy(selectedDestinationNodeId = nodeId)
+        }
+    }
+
+    fun triggerPathfindingFromDropdowns() {
+        val sourceId = _uiState.value.selectedSourceNodeId
+        val destId = _uiState.value.selectedDestinationNodeId
+        val currentMap = _uiState.value.airportMap // Ensure map is loaded
+
+        if (sourceId != null && destId != null && currentMap != null) {
+            findAndSetPath(sourceId, destId)
+
+            _uiState.update {
+                it.copy(
+                    selectedSourceNodeId = null,
+                    selectedDestinationNodeId = null
+                )
+            }
+        } else {
+            viewModelScope.launch {
+                showError("Please select both start and end locations.")
+            }
+        }
+    }
 
     private fun requestInitialLocation() {
         if (uiState.value.permissionsGranted[Manifest.permission.ACCESS_FINE_LOCATION] == true) {
@@ -169,7 +214,12 @@ class MapViewModel(
                 val location = locationService.getLastKnownLocationDirect()
                 Log.d(TAG, "Initial location fetched: $location")
                 location?.let { handleLocationUpdate(it) }
-                    ?: _uiState.update { it.copy(isLoadingLocation = false, statusMessage = "Trying to find your location...") }
+                    ?: _uiState.update {
+                        it.copy(
+                            isLoadingLocation = false,
+                            statusMessage = "Trying to find your location..."
+                        )
+                    }
                 // Don't reset isLoadingLocation here, handleLocationUpdate does it
             }
         } else {
@@ -182,7 +232,10 @@ class MapViewModel(
         if (locationUpdateJob?.isActive == true || uiState.value.permissionsGranted[Manifest.permission.ACCESS_FINE_LOCATION] != true) return
         Log.d(TAG, "Starting location updates flow.")
         // locationUpdateJob = locationService.requestLocationUpdates()... // Keep commented if not used
-        Log.w(TAG, "startLocationUpdates: locationService.requestLocationUpdates() is commented out.")
+        Log.w(
+            TAG,
+            "startLocationUpdates: locationService.requestLocationUpdates() is commented out."
+        )
     }
 
 
@@ -202,11 +255,15 @@ class MapViewModel(
         val mockMapX = location.longitude // Placeholder - NEEDS CORRECT CONVERSION
         val mockMapY = location.latitude  // Placeholder - NEEDS CORRECT CONVERSION
 
-        val closestNode = LocationUtils.findClosestNode(mockMapX, mockMapY, currentFloor, currentMap.nodes)
+        val closestNode =
+            LocationUtils.findClosestNode(mockMapX, mockMapY, currentFloor, currentMap.nodes)
 
         val previousNodeId = uiState.value.currentLocationNodeId
         if (closestNode != null && closestNode.id != previousNodeId) {
-            Log.d(TAG, "GPS mapped to nearest node: ${closestNode.id} (${closestNode.name}) on floor $currentFloor")
+            Log.d(
+                TAG,
+                "GPS mapped to nearest node: ${closestNode.id} (${closestNode.name}) on floor $currentFloor"
+            )
             // Update the current location node ID
             _uiState.update { it.copy(currentLocationNodeId = closestNode.id) }
 
@@ -218,7 +275,12 @@ class MapViewModel(
                 if (closestNode.id == destinationNodeId) {
                     speak("You have arrived at ${closestNode.name}.")
                     updateStatus("Arrived at destination.")
-                    _uiState.update { it.copy(destinationNodeId = null, currentPath = null) } // Clear navigation state
+                    _uiState.update {
+                        it.copy(
+                            destinationNodeId = null,
+                            currentPath = null
+                        )
+                    } // Clear navigation state
                 } else {
                     // Check if the new node is part of the existing path
                     val nodeIndexInPath = currentPath.indexOfFirst { it.id == closestNode.id }
@@ -247,7 +309,10 @@ class MapViewModel(
                 updateStatus("Current location: ${closestNode.name}")
             }
         } else if (closestNode == null) {
-            Log.w(TAG, "Could not find a close node on floor $currentFloor for the current location.")
+            Log.w(
+                TAG,
+                "Could not find a close node on floor $currentFloor for the current location."
+            )
             // Optionally provide feedback: speak("Having trouble pinpointing your exact location on the map.")
         }
         // If closestNode.id == previousNodeId, do nothing (user hasn't moved significantly to a new node area)
@@ -295,7 +360,12 @@ class MapViewModel(
 
     private fun processLlmInput(text: String) {
         if (text.isBlank()) return
-        _uiState.update { it.copy(isProcessing = true, statusMessage = "Thinking...") } // Show processing
+        _uiState.update {
+            it.copy(
+                isProcessing = true,
+                statusMessage = "Thinking..."
+            )
+        } // Show processing
         viewModelScope.launch {
             val currentStateInfo = generateMapStateInfo()
             Log.d(TAG, "Sending to LLM: '$text' with state: $currentStateInfo")
@@ -308,14 +378,17 @@ class MapViewModel(
                     // isProcessing might be set to true again inside handleFunctionCall if pathfinding starts
                     handleFunctionCall(response.functionName, response.parameters)
                 }
+
                 is LLMResponse.ClarificationNeeded -> {
                     _uiState.update { it.copy(isProcessing = false) } // Done processing LLM part
                     updateStatus(response.question); speak(response.question)
                 }
+
                 is LLMResponse.GeneralResponse -> {
                     _uiState.update { it.copy(isProcessing = false) } // Done processing LLM part
                     updateStatus(response.text); speak(response.text)
                 }
+
                 is LLMResponse.ErrorResponse -> {
                     _uiState.update { it.copy(isProcessing = false) } // Done processing LLM part
                     showError(response.message); speak(response.message)
@@ -333,15 +406,18 @@ class MapViewModel(
                         speak("Sorry, I didn't catch the destination.")
                         _uiState.update { it.copy(isProcessing = false) }
                     }
+
                 "updateLocation" -> parameters["locationName"]?.let { handleUpdateLocationRequest(it) } // Already suspend
                     ?: run {
                         speak("Sorry, I didn't catch the location name you mentioned.")
                         _uiState.update { it.copy(isProcessing = false) }
                     }
+
                 "getDistance" -> {
                     handleGetDistanceRequest() // Not suspend, finishes quickly
                     _uiState.update { it.copy(isProcessing = false) }
                 }
+
                 "localizeUser" -> {
                     handleLocalizeUserRequest() // Not suspend, but triggers async location work
                     // isProcessing state might be managed by isLoadingLocation instead
@@ -386,10 +462,16 @@ class MapViewModel(
                 Log.d(TAG, "Finding nearest BATHROOM from ${startNode.id}")
                 LocationUtils.findClosestNodeOfType(startNode, NodeType.BATHROOM, currentMap.nodes)
             }
+
             "EMERGENCY_EXIT" -> {
                 Log.d(TAG, "Finding nearest EMERGENCY_EXIT from ${startNode.id}")
-                LocationUtils.findClosestNodeOfType(startNode, NodeType.EMERGENCY_EXIT, currentMap.nodes)
+                LocationUtils.findClosestNodeOfType(
+                    startNode,
+                    NodeType.EMERGENCY_EXIT,
+                    currentMap.nodes
+                )
             }
+
             else -> {
                 // Handle specific named destinations (e.g., "Gate A1", "Restrooms near Duty Free")
                 Log.d(TAG, "Finding node for specific name/type: $destinationNameOrType")
@@ -415,7 +497,9 @@ class MapViewModel(
 
         // Provide feedback before starting calculation
         val feedbackDestName = when (destinationNameOrType.uppercase()) {
-            "BATHROOM", "EMERGENCY_EXIT" -> "the nearest ${destinationNameOrType.lowercase().replace('_',' ')} (${destinationNode.name})" // Add specific name found
+            "BATHROOM", "EMERGENCY_EXIT" -> "the nearest ${
+                destinationNameOrType.lowercase().replace('_', ' ')
+            } (${destinationNode.name})" // Add specific name found
             else -> destinationNode.name // Use the actual name for specific destinations
         }
 
@@ -426,7 +510,10 @@ class MapViewModel(
         }
         // isProcessing should be true before calling findAndSetPath which is async
         _uiState.update { it.copy(isProcessing = true) }
-        findAndSetPath(startNodeId, destinationNode.id) // This function handles setting isProcessing = false on completion/failure
+        findAndSetPath(
+            startNodeId,
+            destinationNode.id
+        ) // This function handles setting isProcessing = false on completion/failure
     }
 
     // *** MODIFIED handleUpdateLocationRequest to use suspend fun return ***
@@ -494,7 +581,8 @@ class MapViewModel(
         val remainingPath = path.subList(currentIndex, path.size)
         val distance = LocationUtils.calculatePathDistance(remainingPath)
         // TODO: Refine distance/steps calculation based on map scale and average step length
-        val distanceInSteps = (distance / Constants.MOCK_MAP_SCALE_FACTOR).roundToInt() // Example scaling
+        val distanceInSteps =
+            (distance / Constants.MOCK_MAP_SCALE_FACTOR).roundToInt() // Example scaling
         speak("You have approximately $distanceInSteps steps remaining.")
         updateStatus("Approx. $distanceInSteps steps left.")
     }
@@ -538,11 +626,13 @@ class MapViewModel(
                 Log.d(TAG, "Path found with ${pathResult.size} nodes.")
                 val destNodeName = mapNodesById[destinationNodeId]?.name ?: "destination"
                 // Update state *before* speaking instructions
-                _uiState.update { it.copy(
-                    currentPath = pathResult,
-                    destinationNodeId = destinationNodeId,
-                    isProcessing = false // Path calculation done
-                ) }
+                _uiState.update {
+                    it.copy(
+                        currentPath = pathResult,
+                        destinationNodeId = destinationNodeId,
+                        isProcessing = false // Path calculation done
+                    )
+                }
                 updateStatus("Route calculated to $destNodeName.")
                 generateAndSpeakInstructions(pathResult) // Speak first step
             } else {
@@ -551,7 +641,13 @@ class MapViewModel(
                 speak("Sorry, I could not find a path to $destNodeName.")
                 updateStatus("Could not find path.")
                 // Clear path state and reset processing flag
-                _uiState.update { it.copy(currentPath = null, destinationNodeId = null, isProcessing = false) }
+                _uiState.update {
+                    it.copy(
+                        currentPath = null,
+                        destinationNodeId = null,
+                        isProcessing = false
+                    )
+                }
             }
         }
     }
@@ -577,11 +673,18 @@ class MapViewModel(
         } else ""
 
         // Calculate direction based on map coordinates (assuming Y increases upwards)
-        val angle = atan2((nextNode.y - startNode.y).toDouble(), (nextNode.x - startNode.x).toDouble()) * 180 / Math.PI
+        val angle = atan2(
+            (nextNode.y - startNode.y).toDouble(),
+            (nextNode.x - startNode.x).toDouble()
+        ) * 180 / Math.PI
         val direction = angleToDirection(angle)
 
         // Construct instruction
-        val instruction = if (stairsInfo.isNotEmpty() && startNode.type in listOf(NodeType.STAIRS_ELEVATOR, NodeType.CONNECTION)) {
+        val instruction = if (stairsInfo.isNotEmpty() && startNode.type in listOf(
+                NodeType.STAIRS_ELEVATOR,
+                NodeType.CONNECTION
+            )
+        ) {
             // If starting at stairs/elevator and the edge involves floor change
             stairsInfo.trim() + " Then head towards ${nextNode.name}."
         } else {
@@ -630,7 +733,8 @@ class MapViewModel(
             return nodes.find { it.name.equals(gateName, ignoreCase = true) }
         }
         // Check if the original input was already the canonical Gate name
-        nodes.find { it.name.equals(nameOrType, ignoreCase = true) && it.type == NodeType.GATE }?.let { return it }
+        nodes.find { it.name.equals(nameOrType, ignoreCase = true) && it.type == NodeType.GATE }
+            ?.let { return it }
 
 
         // 4. Check if it's a known NodeType enum name (case insensitive)
@@ -642,19 +746,24 @@ class MapViewModel(
             // The "nearest" logic is handled separately in handleFindPathRequest.
             // For now, let's assume if they use a type name, they mean *any* instance.
             // Log a warning if returning the first match for a type.
-            Log.w(TAG, "Query '$nameOrType' matched NodeType $nodeType. Returning first node found with this type.")
+            Log.w(
+                TAG,
+                "Query '$nameOrType' matched NodeType $nodeType. Returning first node found with this type."
+            )
             return nodes.find { it.type == nodeType }
-        } catch (e: Exception) { /* Ignore if not a valid NodeType name */ }
+        } catch (e: Exception) { /* Ignore if not a valid NodeType name */
+        }
 
         // 5. Partial Name Contains Match (case insensitive) - Last resort, might be ambiguous
         // Only return if unambiguous or clearly intended?
         // Example: "Duty" -> "Duty Free Shop" (good)
         // Example: "Area" -> "Check-in Area A" (might be ok if only one)
         // Consider relevance score or length of match if multiple contain the query.
-        nodes.filter { it.name.lowercase().contains(lowerQuery) }.minByOrNull { it.name.length }?.let {
-            Log.d(TAG,"Partial match found for '$nameOrType': ${it.name}")
-            return it
-        } // Find shortest name containing the query as heuristic
+        nodes.filter { it.name.lowercase().contains(lowerQuery) }.minByOrNull { it.name.length }
+            ?.let {
+                Log.d(TAG, "Partial match found for '$nameOrType': ${it.name}")
+                return it
+            } // Find shortest name containing the query as heuristic
 
 
         // 6. No Match Found
@@ -677,7 +786,14 @@ class MapViewModel(
 
         if (newFloor >= minFloor && newFloor <= maxFloor && newFloor != uiState.value.currentFloor) {
             Log.d(TAG, "Changing floor view to $newFloor")
-            _uiState.update { it.copy(currentFloor = newFloor, currentPath = null, destinationNodeId = null, currentLocationNodeId = null) } // Reset path/location when changing floor manually? Or try to map?
+            _uiState.update {
+                it.copy(
+                    currentFloor = newFloor,
+                    currentPath = null,
+                    destinationNodeId = null,
+                    currentLocationNodeId = null
+                )
+            } // Reset path/location when changing floor manually? Or try to map?
             // Resetting seems safer unless you implement cross-floor location persistence/mapping.
             updateStatus("Switched to Floor $newFloor. Tap mic if you need help.")
             // Optionally, try to find the nearest node on the *new* floor if location is available
@@ -686,6 +802,7 @@ class MapViewModel(
     }
 
     data class Vec(val x: Float, val y: Float)
+
     private fun Node.toVec(): Vec = Vec(this.x.toFloat(), this.y.toFloat())
 
     private fun angleToDirection(angle: Double): String {
@@ -738,13 +855,23 @@ class MapViewModel(
                         val ttsSvc = TextToSpeechService(appContext)
                         val speechSvc = SpeechRecognitionService(appContext)
                         val llmSvc = MockLlmService()
-                        return MapViewModel(mapRepo, ticketRepo, connectivitySvc, locationSvc, ttsSvc, speechSvc, llmSvc, username) as T
+                        return MapViewModel(
+                            mapRepo,
+                            ticketRepo,
+                            connectivitySvc,
+                            locationSvc,
+                            ttsSvc,
+                            speechSvc,
+                            llmSvc,
+                            username
+                        ) as T
                     }
                     throw IllegalArgumentException("Unknown ViewModel class")
                 }
             }
     }
 }
+
 // Define constants if not already defined elsewhere
 object Constants {
     const val DEFAULT_AIRPORT_CODE = "BCN_T1" // Example
