@@ -17,7 +17,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.nonstac.airportguide.data.model.Node
+import com.nonstac.airportguide.data.model.Node // Ensure Node is imported
 import com.nonstac.airportguide.data.model.NodeType
 import com.nonstac.airportguide.util.PermissionsHandler // Keep this if used elsewhere, otherwise check direct state
 import com.nonstac.airportguide.ui.theme.VuelingYellow
@@ -37,6 +37,7 @@ fun MapScreen(
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
+        // Check if FINE location was granted specifically
         val fineLocationGranted = permissions.getOrDefault(Manifest.permission.ACCESS_FINE_LOCATION, false)
         mapViewModel.onPermissionResult(Manifest.permission.ACCESS_FINE_LOCATION, fineLocationGranted)
     }
@@ -57,7 +58,7 @@ fun MapScreen(
         } else {
             mapViewModel.onPermissionResult(Manifest.permission.ACCESS_FINE_LOCATION, true)
         }
-        // Update ViewModel with current audio permission status
+        // Update ViewModel with current audio permission status (important!)
         mapViewModel.onPermissionResult(Manifest.permission.RECORD_AUDIO, PermissionsHandler.hasAudioPermission(context))
     }
 
@@ -98,16 +99,18 @@ fun MapScreen(
         floatingActionButton = {
             FloatingActionButton(
                 onClick = {
+                    // --- MODIFIED onClick LOGIC ---
                     // Check permission directly from the ViewModel state
                     if (uiState.permissionsGranted[Manifest.permission.RECORD_AUDIO] == true) {
                         // Permission granted: Call the ViewModel function that stops TTS and starts ASR
                         Log.d("MapScreen", "FAB Clicked: Permission OK, calling interruptSpeechAndListen.")
-                        mapViewModel.interruptSpeechAndListen()
+                        mapViewModel.interruptSpeechAndListen() // <<<<<<< CALL THIS FUNCTION
                     } else {
                         // Permission not granted: Launch the permission request
                         Log.d("MapScreen", "FAB Clicked: Permission needed, launching request.")
-                        audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) // <<<<<<< LAUNCH PERMISSION REQUEST
                     }
+                    // --- END OF MODIFIED onClick LOGIC ---
                 },
                 containerColor = VuelingYellow,
                 contentColor = MaterialTheme.colorScheme.onPrimaryContainer
@@ -159,7 +162,7 @@ fun MapScreen(
 
             Card(
                 modifier = Modifier
-                    .align(Alignment.TopCenter)
+                    .align(Alignment.TopCenter) // Changed alignment to TopCenter
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp),
                 elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
@@ -191,6 +194,7 @@ fun MapScreen(
                         textAlign = TextAlign.Center,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    // Combined processing indicator for LLM or location finding
                     if (uiState.isProcessing || uiState.isLoadingLocation) {
                         Spacer(modifier = Modifier.height(8.dp))
                         LinearProgressIndicator(modifier = Modifier.fillMaxWidth())

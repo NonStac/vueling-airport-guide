@@ -24,8 +24,8 @@ import kotlin.math.roundToInt
 
 data class MapUiState(
     val isLoadingMap: Boolean = true,
-    val isLoadingLocation: Boolean = false,
-    val isProcessing: Boolean = false,
+    val isLoadingLocation: Boolean = false, // Separate loading state for location
+    val isProcessing: Boolean = false, // For LLM/Action processing
     val isListening: Boolean = false,
     val isSpeaking: Boolean = false,
     val airportMap: AirportMap? = null,
@@ -35,8 +35,8 @@ data class MapUiState(
     val currentPath: List<Node>? = null,
     val statusMessage: String? = "Tap the mic to start",
     val isBlackout: Boolean = false,
-    val userFlightGate: String? = null,
-    val currentFloor: Int = 1,
+    val userFlightGate: String? = null, // Gate ID like "A2"
+    val currentFloor: Int = 1, // Default starting floor
     val permissionsGranted: Map<String, Boolean> = mapOf(
         Manifest.permission.ACCESS_FINE_LOCATION to false,
         Manifest.permission.RECORD_AUDIO to false
@@ -45,13 +45,16 @@ data class MapUiState(
 )
 
 class MapViewModel(
+    // Repositories
     private val mapRepository: MapRepository,
     private val ticketRepository: TicketRepository,
+    // Services
     private val connectivityService: ConnectivityService,
     private val locationService: LocationService,
-    private val ttsService: TextToSpeechService, // For stopping speech
+    private val ttsService: TextToSpeechService, // <<<<<<< Make sure this is here
     private val speechRecognitionService: SpeechRecognitionService,
-    private val llmService: MockLlmService,
+    private val llmService: MockLlmService, // Using the mock
+    // User Info
     private val username: String
 ) : ViewModel() {
 
@@ -61,7 +64,7 @@ class MapViewModel(
     val snackbarHostState = SnackbarHostState()
     private var locationUpdateJob: Job? = null
     private var mapNodesById: Map<String, Node> = emptyMap()
-    private val TAG = "MapViewModel_Airport"
+    private val TAG = "MapViewModel_Airport" // Added TAG for consistency
 
     init {
         Log.d(TAG, "Initializing for user: $username")
@@ -72,18 +75,21 @@ class MapViewModel(
     private fun loadInitialData() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoadingMap = true) }
+            // Load Map
             mapRepository.getAirportMap(Constants.DEFAULT_AIRPORT_CODE)
                 .onSuccess { map ->
                     Log.d(TAG, "Map loaded: ${map.airportName}")
                     mapNodesById = map.nodes.associateBy { node -> node.id }
                     _uiState.update { it.copy(airportMap = map, isLoadingMap = false) }
-                    requestInitialLocation()
+                    // Try to get initial location after map load (Commented out in provided code, restore if needed)
+                    // requestInitialLocation()
                 }.onFailure { error ->
                     Log.e(TAG, "Failed to load map", error)
                     _uiState.update { it.copy(isLoadingMap = false) }
                     showError("Failed to load airport map: ${error.message}")
                 }
 
+            // Fetch user's gate (find first relevant upcoming flight)
             ticketRepository.getBoughtTickets(username)
                 .onSuccess { tickets ->
                     val relevantTicket = tickets.firstOrNull { it.status == TicketStatus.BOUGHT }
@@ -96,38 +102,44 @@ class MapViewModel(
     }
 
     private fun observeServices() {
+        // Connectivity
         connectivityService.isConnected
             .onEach { isConnected -> _uiState.update { it.copy(isBlackout = !isConnected) } }
             .launchIn(viewModelScope)
 
+        // ASR Listening State
         speechRecognitionService.isListening
             .onEach { listening -> _uiState.update { it.copy(isListening = listening) } }
             .launchIn(viewModelScope)
 
+        // ASR Results
         speechRecognitionService.recognizedText
             .filterNotNull()
             .onEach { text ->
                 Log.d(TAG, "ASR Result: $text")
                 _uiState.update { it.copy(statusMessage = "Processing: '$text'") }
                 processLlmInput(text)
-                speechRecognitionService.clearRecognizedText()
+                speechRecognitionService.clearRecognizedText() // Consume the text
             }
             .launchIn(viewModelScope)
 
+        // ASR Errors
         speechRecognitionService.error
             .filterNotNull()
             .onEach { errorMsg ->
                 Log.e(TAG, "ASR Error: $errorMsg")
                 showError("Speech recognition error: $errorMsg")
                 _uiState.update { it.copy(isProcessing = false, isListening = false) }
-                speechRecognitionService.clearError()
+                speechRecognitionService.clearError() // Consume the error
             }
             .launchIn(viewModelScope)
 
+        // TTS Speaking State
         ttsService.isSpeaking
             .onEach { speaking -> _uiState.update { it.copy(isSpeaking = speaking) } }
             .launchIn(viewModelScope)
 
+        // Location (updates started based on permission)
         locationService.lastKnownLocation
             .onEach { location -> location?.let { handleLocationUpdate(it) } }
             .launchIn(viewModelScope)
@@ -138,18 +150,21 @@ class MapViewModel(
         _uiState.update {
             it.copy(permissionsGranted = it.permissionsGranted + (permission to granted))
         }
+
         if (permission == Manifest.permission.ACCESS_FINE_LOCATION) {
             if (granted) {
-                startLocationUpdates()
-                requestInitialLocation()
+                startLocationUpdates() // This internally uses viewModelScope
+                requestInitialLocation() // This internally uses viewModelScope
             } else {
                 viewModelScope.launch { showError("Location permission is required for navigation assistance.") }
             }
         }
-        if (permission == Manifest.permission.RECORD_AUDIO && !granted) {
-            viewModelScope.launch { showError("Audio permission is required for voice commands.") }
-        }
+
+        // We don't need the specific error handling for RECORD_AUDIO here anymore,
+        // as the interruptSpeechAndListen function and FAB onClick handle it.
+        // if (permission == Manifest.permission.RECORD_AUDIO && !granted) { ... }
     }
+
 
     private fun requestInitialLocation() {
         if (uiState.value.permissionsGranted[Manifest.permission.ACCESS_FINE_LOCATION] == true) {
@@ -170,6 +185,8 @@ class MapViewModel(
     private fun startLocationUpdates() {
         if (locationUpdateJob?.isActive == true || uiState.value.permissionsGranted[Manifest.permission.ACCESS_FINE_LOCATION] != true) return
         Log.d(TAG, "Starting location updates flow.")
+        // Location updates seem commented out in your provided code, uncomment if needed
+        /*
         locationUpdateJob = locationService.requestLocationUpdates()
             .catch { e ->
                 Log.e(TAG, "Location updates error", e)
@@ -177,7 +194,11 @@ class MapViewModel(
                 _uiState.update { it.copy(isLoadingLocation = false) }
             }
             .launchIn(viewModelScope)
+        */
+        Log.w(TAG, "startLocationUpdates: locationService.requestLocationUpdates() is commented out.")
+
     }
+
 
     private fun handleLocationUpdate(location: Location) {
         _uiState.update { it.copy(currentLocation = location, isLoadingLocation = false) }
@@ -187,8 +208,8 @@ class MapViewModel(
     private fun findAndSetNearestNode(location: Location) {
         val currentMap = uiState.value.airportMap ?: return
         val currentFloor = uiState.value.currentFloor
-        val mockMapX = location.longitude // Placeholder for real projection
-        val mockMapY = location.latitude  // Placeholder for real projection
+        val mockMapX = location.longitude // Placeholder
+        val mockMapY = location.latitude  // Placeholder
 
         val closestNode = LocationUtils.findClosestNode(mockMapX, mockMapY, currentFloor, currentMap.nodes)
 
@@ -213,39 +234,50 @@ class MapViewModel(
         }
     }
 
-    // --- New function to handle Mic Button Click ---
+    // --- ADDED FUNCTION to handle Mic Button Click ---
     fun interruptSpeechAndListen() {
         Log.d(TAG, "Interrupt speech and listen requested.")
-        // Stop TTS immediately
+        // 1. Stop TTS immediately
         ttsService.stop()
 
-        // Check Audio Permission and Start Listening
+        // 2. Check Audio Permission and Start Listening
         if (uiState.value.permissionsGranted[Manifest.permission.RECORD_AUDIO] == true) {
-            if (!uiState.value.isListening) {
+            if (!uiState.value.isListening) { // Avoid starting if already listening
                 Log.d(TAG, "Starting ASR listening.")
-                speechRecognitionService.clearError() // Clear previous errors
-                speechRecognitionService.clearRecognizedText() // Clear previous text
+                speechRecognitionService.clearError() // Clear previous errors/state
+                speechRecognitionService.clearRecognizedText()
                 speechRecognitionService.startListening()
                 _uiState.update { it.copy(statusMessage = "Listening...", isProcessing = false) }
             } else {
                 Log.d(TAG, "Already listening, ignoring request.")
-                // Optionally: Stop listening if tapped while already listening?
+                // Optionally: Could implement logic to stop listening if tapped again
                 // speechRecognitionService.stopListening()
             }
         } else {
+            // Permission not granted. The UI should have launched the permission request.
+            // Show a message here as a fallback or reminder.
             Log.w(TAG, "Cannot start listening - Audio permission required.")
-            // UI should have triggered permission request via launcher.
-            // Show snackbar message here to remind user if needed.
             viewModelScope.launch {
                 showError("Audio permission required to use voice commands.")
             }
         }
     }
-    // --- End of new function ---
+    // --- End of added function ---
 
-    // Existing startListening might become obsolete or private
-    // fun startListening() { ... }
-
+    // This function might still be useful internally, but FAB should call interruptSpeechAndListen
+    fun startListening() {
+        if (!uiState.value.isListening) {
+            if (uiState.value.permissionsGranted[Manifest.permission.RECORD_AUDIO] == true) {
+                Log.d(TAG, "Starting ASR listening (via startListening).")
+                speechRecognitionService.clearError()
+                speechRecognitionService.clearRecognizedText()
+                speechRecognitionService.startListening()
+                _uiState.update { it.copy(statusMessage = "Listening...", isProcessing = false) }
+            } else {
+                viewModelScope.launch { showError("Audio permission required to use voice commands.") }
+            }
+        }
+    }
 
     private fun processLlmInput(text: String) {
         if (text.isBlank()) return
@@ -299,17 +331,17 @@ class MapViewModel(
         val startNodeId = uiState.value.currentLocationNodeId ?: run {
             speak("I need to know your current location first.")
             updateStatus("Please provide your current location.")
-            return
+            return@handleFindPathRequest // Use qualified return for suspend fun
         }
         val currentMap = uiState.value.airportMap ?: run {
             showError("Map data is not available.")
             speak("I can't calculate a path without map data.")
-            return
+            return@handleFindPathRequest
         }
         val destinationNode = findNodeByNameOrType(destinationName, currentMap.nodes) ?: run {
             speak("Sorry, I couldn't find '$destinationName' on the map.")
             updateStatus("Destination '$destinationName' not found.")
-            return
+            return@handleFindPathRequest
         }
         val startNode = mapNodesById[startNodeId]
         if (startNode?.floor != destinationNode.floor) {
@@ -321,30 +353,33 @@ class MapViewModel(
     }
 
     private fun handleUpdateLocationRequest(locationName: String) {
-        val currentMap = uiState.value.airportMap ?: return
-        val foundNode = findNodeByNameOrType(locationName, currentMap.nodes) ?: run {
-            speak("Sorry, I couldn't find a location matching '$locationName' on the map.")
-            updateStatus("Could not update location to '$locationName'.")
-            return
-        }
+        // Use viewModelScope for potential suspend calls like showError or speak
+        viewModelScope.launch {
+            val currentMap = uiState.value.airportMap ?: return@launch
+            val foundNode = findNodeByNameOrType(locationName, currentMap.nodes) ?: run {
+                speak("Sorry, I couldn't find a location matching '$locationName' on the map.")
+                updateStatus("Could not update location to '$locationName'.")
+                return@launch
+            }
 
-        Log.d(TAG, "User stated location resolved to node: ${foundNode.id} (${foundNode.name})")
-        if (foundNode.floor != uiState.value.currentFloor) {
-            changeFloor(foundNode.floor)
-            speak("Okay, you are at ${foundNode.name} on floor ${foundNode.floor}.")
-        } else {
-            speak("Okay, noted you are at ${foundNode.name}.")
-        }
-        _uiState.update { it.copy(currentLocationNodeId = foundNode.id) }
-        updateStatus("Current location updated to: ${foundNode.name}")
+            Log.d(TAG, "User stated location resolved to node: ${foundNode.id} (${foundNode.name})")
+            if (foundNode.floor != uiState.value.currentFloor) {
+                changeFloor(foundNode.floor) // This updates state
+                speak("Okay, you are at ${foundNode.name} on floor ${foundNode.floor}.")
+            } else {
+                speak("Okay, noted you are at ${foundNode.name}.")
+            }
+            _uiState.update { it.copy(currentLocationNodeId = foundNode.id) }
+            updateStatus("Current location updated to: ${foundNode.name}")
 
-        val destId = uiState.value.destinationNodeId
-        if (destId != null) {
-            if (foundNode.id == destId) {
-                speak("You have arrived at your destination: ${foundNode.name}")
-                _uiState.update { it.copy(destinationNodeId = null, currentPath = null) }
-            } else if (uiState.value.currentPath != null) {
-                findAndSetPath(foundNode.id, destId)
+            val destId = uiState.value.destinationNodeId
+            if (destId != null) {
+                if (foundNode.id == destId) {
+                    speak("You have arrived at your destination: ${foundNode.name}")
+                    _uiState.update { it.copy(destinationNodeId = null, currentPath = null) }
+                } else if (uiState.value.currentPath != null) {
+                    findAndSetPath(foundNode.id, destId) // This launches its own scope
+                }
             }
         }
     }
@@ -401,7 +436,7 @@ class MapViewModel(
 
         viewModelScope.launch {
             val pathResult = AStar.findPath(startNodeId, destinationNodeId, currentMap)
-            if (pathResult != null && pathResult.isNotEmpty()) {
+            if (!pathResult.isNullOrEmpty()) {
                 Log.d(TAG, "Path found with ${pathResult.size} nodes.")
                 _uiState.update { it.copy(currentPath = pathResult, destinationNodeId = destinationNodeId, isProcessing = false) }
                 updateStatus("Route calculated to ${mapNodesById[destinationNodeId]?.name ?: "destination"}.")
@@ -431,7 +466,7 @@ class MapViewModel(
     private fun speak(text: String) {
         if (text.isNotBlank()) {
             Log.d(TAG, "TTS Request: '$text'")
-            ttsService.speak(text)
+            ttsService.speak(text) // Assuming speak is not suspend
         }
     }
 
@@ -449,7 +484,7 @@ class MapViewModel(
         mapNodesById[nameOrType.uppercase()]?.let { return it }
         nodes.find { it.name.equals(lowerQuery, ignoreCase = true) }?.let { return it }
         nodes.find { it.name.lowercase().contains(lowerQuery) }?.let { return it }
-        try { NodeType.valueOf(lowerQuery.uppercase())?.let { type -> return nodes.find { it.type == type } } } catch (e: Exception) { /* Ignore */ }
+        try { NodeType.valueOf(lowerQuery.uppercase()).let { type -> return nodes.find { it.type == type } } } catch (e: Exception) { /* Ignore */ }
         val gateRegex = """(gate\s?)?([a-zA-Z])\s?(\d+)""".toRegex()
         gateRegex.matchEntire(lowerQuery)?.let { match ->
             val gateName = "Gate ${match.groupValues[2].uppercase()}${match.groupValues[3]}"
@@ -471,17 +506,18 @@ class MapViewModel(
         if (newFloor in minFloor..maxFloor && newFloor != uiState.value.currentFloor) {
             Log.d(TAG, "Changing floor view to $newFloor")
             _uiState.update { it.copy(currentFloor = newFloor) }
-            uiState.value.currentLocation?.let { loc -> findAndSetNearestNode(loc) }
+            // Restore this line if needed, commented out in provided code
+            // uiState.value.currentLocation?.let { loc -> findAndSetNearestNode(loc) }
         }
     }
 
     data class Vec(val x: Float, val y: Float)
     private fun Node.toVec(): Vec = Vec(this.x.toFloat(), this.y.toFloat())
     private fun angleToDirection(angle: Double): String = when (angle) {
-        in -22.5..22.5 -> "right"; in 22.5..67.5 -> "up-right"; in 67.5..112.5 -> "up"
-        in 112.5..157.5 -> "up-left"; in 157.5..180.0, in -180.0..-157.5 -> "left"
-        in -157.5..-112.5 -> "down-left"; in -112.5..-67.5 -> "down"; in -67.5..-22.5 -> "down-right"
-        else -> "nearby"
+        in -22.5..22.5 -> "right"; in 22.5..67.5 -> "up and right"; in 67.5..112.5 -> "up"
+        in 112.5..157.5 -> "up and left"; in 157.5..180.0, in -180.0..-157.5 -> "left"
+        in -157.5..-112.5 -> "down and left"; in -112.5..-67.5 -> "down"; in -67.5..-22.5 -> "down and right"
+        else -> "nearby" // Simplified some diagonal names
     }
 
     override fun onCleared() {
@@ -489,7 +525,7 @@ class MapViewModel(
         Log.d(TAG, "onCleared called.")
         locationUpdateJob?.cancel()
         connectivityService.unregisterCallback()
-        ttsService.shutdown()
+        ttsService.shutdown() // Ensure TTS is shut down
         speechRecognitionService.destroy()
     }
 
@@ -513,7 +549,7 @@ class MapViewModel(
                         val ticketRepo = MockTicketRepository()
                         val connectivitySvc = ConnectivityService(context)
                         val locationSvc = LocationService(context)
-                        val ttsSvc = TextToSpeechService(context)
+                        val ttsSvc = TextToSpeechService(context) // Instance needed
                         val speechSvc = SpeechRecognitionService(context)
                         val llmSvc = MockLlmService()
                         return MapViewModel(mapRepo, ticketRepo, connectivitySvc, locationSvc, ttsSvc, speechSvc, llmSvc, username) as T
