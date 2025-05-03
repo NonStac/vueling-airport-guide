@@ -22,6 +22,7 @@ import com.nonstac.airportguide.data.model.NodeType
 import com.nonstac.airportguide.util.PermissionsHandler
 import com.nonstac.airportguide.ui.theme.VuelingYellow
 import android.util.Log
+import androidx.compose.material.icons.automirrored.filled.CompareArrows
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.automirrored.filled.MenuOpen
 import com.nonstac.airportguide.ui.theme.OnPrimaryLight
@@ -48,7 +49,6 @@ fun MapScreen(
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
-        // Check if FINE location was granted specifically
         val fineLocationGranted =
             permissions.getOrDefault(Manifest.permission.ACCESS_FINE_LOCATION, false)
         mapViewModel.onPermissionResult(
@@ -61,7 +61,6 @@ fun MapScreen(
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         mapViewModel.onPermissionResult(Manifest.permission.RECORD_AUDIO, isGranted)
-        // No automatic action needed here after grant, user must tap again
     }
 
     // --- Request permissions on screen launch if not already granted ---
@@ -152,7 +151,6 @@ fun MapScreen(
 
                 FloatingActionButton(
                     onClick = {
-                        // --- MODIFIED onClick LOGIC ---
                         // Check permission directly from the ViewModel state
                         if (uiState.permissionsGranted[Manifest.permission.RECORD_AUDIO] == true) {
                             // Permission granted: Call the ViewModel function that stops TTS and starts ASR
@@ -160,13 +158,12 @@ fun MapScreen(
                                 "MapScreen",
                                 "FAB Clicked: Permission OK, calling interruptSpeechAndListen."
                             )
-                            mapViewModel.interruptSpeechAndListen() // <<<<<<< CALL THIS FUNCTION
+                            mapViewModel.interruptSpeechAndListen()
                         } else {
                             // Permission not granted: Launch the permission request
                             Log.d("MapScreen", "FAB Clicked: Permission needed, launching request.")
-                            audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) // <<<<<<< LAUNCH PERMISSION REQUEST
+                            audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                         }
-                        // --- END OF MODIFIED onClick LOGIC ---
                     },
                     containerColor = VuelingYellow,
                     contentColor = VuelingDarkGray
@@ -204,7 +201,7 @@ fun MapScreen(
                         currentFloor = uiState.currentFloor,
                         isBlackout = uiState.isBlackout,
                         modifier = Modifier.fillMaxSize(),
-                        onNodeClick = mapViewModel::selectNode // Use method reference
+                        onNodeClick = mapViewModel::selectNode
                     )
                 }
 
@@ -223,7 +220,7 @@ fun MapScreen(
 
             Card(
                 modifier = Modifier
-                    .align(Alignment.TopCenter) // Changed alignment to TopCenter
+                    .align(Alignment.TopCenter)
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp),
                 elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
@@ -269,7 +266,7 @@ fun MapScreen(
 
             DropdownPopup(
                 showDialog = showDropdownPopup,
-                onDismiss = { showDropdownPopup = false }, // Set state to false to hide
+                onDismiss = { showDropdownPopup = false },
                 selectableNodes = uiState.selectableNodes,
                 selectedSourceNodeId = uiState.selectedSourceNodeId,
                 selectedDestinationNodeId = uiState.selectedDestinationNodeId,
@@ -285,23 +282,32 @@ fun MapScreen(
 
             NodeInfoDialog(
                 node = uiState.selectedNodeInfo,
-                onDismiss = mapViewModel::dismissNodeInfo // Use method reference
+                onDismiss = mapViewModel::dismissNodeInfo,
+
+                onSetCurrentNode = { node ->
+                    mapViewModel.setCurrentNodeFromDialog(node)
+                    mapViewModel.dismissNodeInfo()
+                },
+                onSetDestinationNode = { node ->
+                    mapViewModel.setDestinationNodeFromDialog(node)
+                    mapViewModel.dismissNodeInfo()
+                }
             )
 
-        } // End Box
-    } // End Scaffold
+        }
+    }
 }
 
 @Composable
 fun DropdownPopup(
     showDialog: Boolean,
     onDismiss: () -> Unit,
-    selectableNodes: List<Node>, // Pass the list of nodes
+    selectableNodes: List<Node>,
     selectedSourceNodeId: String?,
     selectedDestinationNodeId: String?,
-    onSourceSelected: (String?) -> Unit, // Callback for source selection
-    onDestinationSelected: (String?) -> Unit, // Callback for destination selection
-    onFindPathClick: () -> Unit // Callback for the button click
+    onSourceSelected: (String?) -> Unit,
+    onDestinationSelected: (String?) -> Unit,
+    onFindPathClick: () -> Unit
 ) {
     if (showDialog) {
         AlertDialog(
@@ -309,7 +315,6 @@ fun DropdownPopup(
             title = { Text("Select Location & Destination") },
             text = {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    // Row containing the dropdowns
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -317,7 +322,7 @@ fun DropdownPopup(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        NodeDropdown( // Use the NodeDropdown composable
+                        NodeDropdown(
                             label = "From",
                             options = selectableNodes,
                             selectedNodeId = selectedSourceNodeId,
@@ -325,7 +330,7 @@ fun DropdownPopup(
                             modifier = Modifier.weight(1f)
                         )
 
-                        NodeDropdown( // Use the NodeDropdown composable
+                        NodeDropdown(
                             label = "Target",
                             options = selectableNodes,
                             selectedNodeId = selectedDestinationNodeId,
@@ -334,13 +339,13 @@ fun DropdownPopup(
                         )
                     }
                     Spacer(modifier = Modifier.height(16.dp))
-                    // Find Path Button
+
                     Button(
                         onClick = {
-                            onFindPathClick() // Call the find path logic
-                            onDismiss() // Close the dialog after clicking
+                            onFindPathClick()
+                            onDismiss()
                         },
-                        // Enable button only if both dropdowns have a selection
+
                         enabled = selectedSourceNodeId != null && selectedDestinationNodeId != null
                     ) {
                         Icon(Icons.Filled.Route, contentDescription = "Find Path")
@@ -394,9 +399,9 @@ fun NodeDropdown(
                     onNodeSelected(null)
                     expanded = false
                 },
-                contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding, // Use default padding
+                contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding,
             )
-            HorizontalDivider(modifier = Modifier.padding(horizontal = 8.dp)) // Add some horizontal padding
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 8.dp))
 
             options.forEach { node ->
                 DropdownMenuItem(
@@ -405,9 +410,9 @@ fun NodeDropdown(
                         onNodeSelected(node.id)
                         expanded = false
                     },
-                    contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding, // Use default padding
+                    contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding,
                 )
-                HorizontalDivider(modifier = Modifier.padding(horizontal = 8.dp)) // Add some horizontal padding
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 8.dp))
             }
         }
     }
@@ -416,7 +421,9 @@ fun NodeDropdown(
 @Composable
 fun NodeInfoDialog(
     node: Node?,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onSetCurrentNode: (Node) -> Unit,
+    onSetDestinationNode: (Node) -> Unit
 ) {
     if (node != null) {
         AlertDialog(
@@ -436,11 +443,15 @@ fun NodeInfoDialog(
                     )
 
                     NodeType.WAYPOINT -> Icon(Icons.Filled.Place, contentDescription = "Waypoint")
-                    NodeType.STAIRS_ELEVATOR -> { /* Render Nothing */
-                    }
+                    NodeType.STAIRS_ELEVATOR -> Icon(
+                        Icons.Filled.Stairs,
+                        contentDescription = "Stairs/Elevator"
+                    )
 
-                    NodeType.CONNECTION -> { /* Render Nothing */
-                    }
+                    NodeType.CONNECTION -> Icon(
+                        Icons.AutoMirrored.Filled.CompareArrows,
+                        contentDescription = "Connection"
+                    )
                 }
             },
             title = { Text(text = node.name, fontWeight = FontWeight.Bold) },
@@ -449,6 +460,26 @@ fun NodeInfoDialog(
                     Text("Type: ${node.type.name.lowercase().replaceFirstChar { it.titlecase() }}")
                     Text("ID: ${node.id}")
                     Text("Floor: ${node.floor}")
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Button(
+                            onClick = { onSetCurrentNode(node) },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Set as Current Location")
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Button(
+                            onClick = { onSetDestinationNode(node) },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Set as Destination")
+                        }
+                    }
                 }
             },
             confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } }
