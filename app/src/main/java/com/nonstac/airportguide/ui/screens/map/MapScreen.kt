@@ -141,7 +141,7 @@ fun MapScreen(
             // Status Overlay Card
             Card(
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
+                    .align(Alignment.TopCenter)
                     .fillMaxWidth()
                     .padding(16.dp),
                 elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
