@@ -17,11 +17,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.nonstac.airportguide.data.model.Node // Ensure Node is imported
+import com.nonstac.airportguide.data.model.Node
 import com.nonstac.airportguide.data.model.NodeType
-import com.nonstac.airportguide.util.PermissionsHandler // Keep this if used elsewhere, otherwise check direct state
+import com.nonstac.airportguide.util.PermissionsHandler
 import com.nonstac.airportguide.ui.theme.VuelingYellow
-import android.util.Log // Import Log
+import android.util.Log
+import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import com.nonstac.airportguide.ui.theme.OnPrimaryLight
+import com.nonstac.airportguide.ui.theme.VuelingDarkGray
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -68,8 +71,8 @@ fun MapScreen(
             TopAppBar(
                 title = { Text(uiState.airportMap?.airportName ?: "Airport Map") },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    containerColor = VuelingDarkGray,
+                    titleContentColor = OnPrimaryLight
                 ),
                 actions = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -113,13 +116,13 @@ fun MapScreen(
                     // --- END OF MODIFIED onClick LOGIC ---
                 },
                 containerColor = VuelingYellow,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                contentColor = VuelingDarkGray
             ) {
                 if (uiState.isListening) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(24.dp),
                         strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.primary
+                        color = VuelingDarkGray
                     )
                 } else {
                     Icon(Icons.Filled.Mic, contentDescription = "Start Voice Command")
@@ -223,7 +226,7 @@ fun NodeInfoDialog(
                 when(node.type) {
                     NodeType.GATE -> Icon(Icons.Filled.MeetingRoom, contentDescription = "Gate")
                     NodeType.BATHROOM -> Icon(Icons.Filled.Wc, contentDescription = "Bathroom")
-                    NodeType.EMERGENCY_EXIT -> Icon(Icons.Filled.ExitToApp, contentDescription = "Exit")
+                    NodeType.EMERGENCY_EXIT -> Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = "Exit")
                     NodeType.ENTRANCE -> Icon(Icons.Filled.DoorFront, contentDescription = "Entrance")
                     NodeType.WAYPOINT -> Icon(Icons.Filled.Place, contentDescription = "Waypoint")
                     NodeType.STAIRS_ELEVATOR -> { /* Render Nothing */ }
