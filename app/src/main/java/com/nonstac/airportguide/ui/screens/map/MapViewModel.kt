@@ -83,7 +83,7 @@ class MapViewModel(
                     mapNodesById = map.nodes.associateBy { node -> node.id }
                     _uiState.update { it.copy(airportMap = map, isLoadingMap = false) }
                     // Try to get initial location after map load
-                    requestInitialLocation()
+//                    requestInitialLocation()
                 }.onFailure { error ->
                     Log.e("MapViewModel", "Failed to load map", error)
                     _uiState.update { it.copy(isLoadingMap = false) }
@@ -201,14 +201,14 @@ class MapViewModel(
         if (locationUpdateJob?.isActive == true) return // Already running
         if (uiState.value.permissionsGranted[Manifest.permission.ACCESS_FINE_LOCATION] == true) {
             Log.d("MapViewModel", "Starting location updates flow.")
-            locationUpdateJob = locationService.requestLocationUpdates()
-                // Using .catch is important for flow cancellation/errors
-                .catch { e ->
-                    Log.e("MapViewModel", "Location updates error", e)
-                    showError("Location updates failed: ${e.message}")
-                    _uiState.update { it.copy(isLoadingLocation = false) }
-                }
-                .launchIn(viewModelScope) // Collects implicitly
+//            locationUpdateJob = locationService.requestLocationUpdates()
+//                // Using .catch is important for flow cancellation/errors
+//                .catch { e ->
+//                    Log.e("MapViewModel", "Location updates error", e)
+//                    showError("Location updates failed: ${e.message}")
+//                    _uiState.update { it.copy(isLoadingLocation = false) }
+//                }
+//                .launchIn(viewModelScope) // Collects implicitly
         } else {
             Log.w("MapViewModel", "Cannot start location updates, permission missing.")
         }
@@ -223,14 +223,6 @@ class MapViewModel(
     private fun findAndSetNearestNode(location: Location) {
         val currentMap = uiState.value.airportMap ?: return
         val currentFloor = uiState.value.currentFloor // Use the currently viewed floor
-
-        // --- VERY IMPORTANT HACKATHON SIMPLIFICATION ---
-        // Real indoor positioning is complex. Here we simulate it by finding
-        // the closest node on the *currently viewed floor* based on GPS (which usually doesn't have floor info).
-        // We assume GPS gives X,Y usable for the map's coordinate system.
-        // In reality, you'd use Wifi/Beacon fingerprinting or other indoor methods.
-        // We also need to translate GPS lat/lon to map X/Y - skipping that translation here for brevity.
-        // Let's pretend location.latitude maps to map Y and location.longitude maps to map X.
 
         // Find node on the *current floor* closest to the (mock) location coordinates
         // Using 0,0 as placeholder for GPS to Map XY conversion - REPLACE with actual calculation if possible
@@ -508,7 +500,7 @@ class MapViewModel(
 
         viewModelScope.launch {
             val pathResult = AStar.findPath(startNodeId, destinationNodeId, currentMap)
-            if (pathResult != null && pathResult.isNotEmpty()) {
+            if (!pathResult.isNullOrEmpty()) {
                 Log.d("MapViewModel", "Path found with ${pathResult.size} nodes.")
                 _uiState.update {
                     it.copy(
@@ -618,7 +610,7 @@ class MapViewModel(
             currentKnownLocationId = state.currentLocationNodeId,
             currentDestinationId = state.destinationNodeId,
             userFlightGate = state.userFlightGate, // Pass the fetched gate info
-            isPathActive = state.currentPath != null && state.currentPath.isNotEmpty()
+            isPathActive = !state.currentPath.isNullOrEmpty()
         )
     }
 
@@ -629,7 +621,7 @@ class MapViewModel(
             Log.d("MapViewModel", "Changing floor view to $newFloor")
             _uiState.update { it.copy(currentFloor = newFloor) }
             // When floor changes, re-evaluate the nearest node based on GPS if available
-            uiState.value.currentLocation?.let { loc -> findAndSetNearestNode(loc) }
+//            uiState.value.currentLocation?.let { loc -> findAndSetNearestNode(loc) }
             // Clear path/destination if they are not relevant to the new floor? Optional.
             // _uiState.update { it.copy(currentPath = null, destinationNodeId = null) }
         }
