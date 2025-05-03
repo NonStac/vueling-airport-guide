@@ -24,6 +24,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nonstac.airportguide.data.model.Ticket
 import com.nonstac.airportguide.data.model.TicketStatus
+import com.nonstac.airportguide.ui.theme.OnPrimaryLight
+import com.nonstac.airportguide.ui.theme.VuelingDarkGray
 import com.nonstac.airportguide.ui.theme.VuelingGray
 import com.nonstac.airportguide.ui.theme.VuelingYellow
 
@@ -57,8 +59,8 @@ fun TicketsScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    containerColor = VuelingDarkGray,
+                    titleContentColor = OnPrimaryLight
                 )
             )
         }
@@ -130,7 +132,7 @@ fun SegmentedButtonToggle(
                 icon = {}, // Optional icon
                 colors = SegmentedButtonDefaults.colors(
                     activeContainerColor = VuelingYellow,
-                    activeContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    activeContentColor = VuelingDarkGray,
                     inactiveContainerColor = MaterialTheme.colorScheme.surfaceVariant,
                     inactiveContentColor = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -211,7 +213,7 @@ fun TicketItem(ticket: Ticket, isAvailable: Boolean, onBuyClick: () -> Unit, isB
                     onClick = onBuyClick,
                     modifier = Modifier.align(Alignment.End).padding(16.dp),
                     enabled = !isBuying,
-                    colors = ButtonDefaults.buttonColors(containerColor = VuelingYellow)
+                    colors = ButtonDefaults.buttonColors(containerColor = VuelingYellow, contentColor = VuelingDarkGray)
                 ) {
                     if (isBuying) {
                         CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary)
@@ -220,7 +222,7 @@ fun TicketItem(ticket: Ticket, isAvailable: Boolean, onBuyClick: () -> Unit, isB
                     } else {
                         Icon(Icons.Default.FlightTakeoff, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
                         Spacer(Modifier.width(ButtonDefaults.IconSpacing))
-                        Text("Buy Ticket", color = MaterialTheme.colorScheme.onPrimaryContainer)
+                        Text("Buy Ticket", color = VuelingDarkGray)
                     }
                 }
             } else {

@@ -18,6 +18,8 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.nonstac.airportguide.ui.theme.OnPrimaryLight
+import com.nonstac.airportguide.ui.theme.VuelingDarkGray
 import com.nonstac.airportguide.ui.theme.VuelingYellow
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -59,8 +61,8 @@ fun RegisterScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    containerColor = VuelingDarkGray,
+                    titleContentColor = OnPrimaryLight
                 )
             )
         }
@@ -139,12 +141,12 @@ fun RegisterScreen(
                 onClick = { registerViewModel.register() },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !uiState.isLoading,
-                colors = ButtonDefaults.buttonColors(containerColor = VuelingYellow)
+                colors = ButtonDefaults.buttonColors(containerColor = VuelingYellow, contentColor = VuelingDarkGray)
             ) {
                 if (uiState.isLoading) {
                     CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary)
                 } else {
-                    Text("Register", color = MaterialTheme.colorScheme.onPrimaryContainer)
+                    Text("Register", color = VuelingDarkGray)
                 }
             }
             Spacer(modifier = Modifier.height(16.dp))

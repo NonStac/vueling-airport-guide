@@ -17,6 +17,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.nonstac.airportguide.ui.theme.VuelingDarkGray
 import com.nonstac.airportguide.ui.theme.VuelingYellow
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -110,12 +111,12 @@ fun LoginScreen(
                 onClick = { loginViewModel.login() },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !uiState.isLoading,
-                colors = ButtonDefaults.buttonColors(containerColor = VuelingYellow)
+                colors = ButtonDefaults.buttonColors(containerColor = VuelingYellow, contentColor = VuelingDarkGray)
             ) {
                 if (uiState.isLoading) {
                     CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary)
                 } else {
-                    Text("Login", color = MaterialTheme.colorScheme.onPrimaryContainer)
+                    Text("Login", color = VuelingDarkGray)
                 }
             }
             Spacer(modifier = Modifier.height(16.dp))
