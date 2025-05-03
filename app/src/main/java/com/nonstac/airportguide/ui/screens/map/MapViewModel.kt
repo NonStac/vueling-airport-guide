@@ -14,6 +14,7 @@ import com.nonstac.airportguide.data.repository.MapRepositoryImpl
 import com.nonstac.airportguide.data.repository.MockTicketRepository
 import com.nonstac.airportguide.data.repository.TicketRepository
 import com.nonstac.airportguide.data.local.AirportMapDataSource
+import com.nonstac.airportguide.data.model.Node
 import com.nonstac.airportguide.service.*
 import com.nonstac.airportguide.util.*
 import kotlinx.coroutines.Job
@@ -41,7 +42,8 @@ data class MapUiState(
     val permissionsGranted: Map<String, Boolean> = mapOf(
         Manifest.permission.ACCESS_FINE_LOCATION to false,
         Manifest.permission.RECORD_AUDIO to false
-    )
+    ),
+    val selectedNodeInfo: Node? = null
 )
 
 class MapViewModel(
@@ -663,19 +665,28 @@ class MapViewModel(
         speechRecognitionService.destroy()
     }
 
+    fun selectNode(node: Node) {
+        Log.d("MapViewModel", "Node selected: ${node.id} (${node.name})")
+        _uiState.update { it.copy(selectedNodeInfo = node) }
+    }
+
+    fun dismissNodeInfo() {
+        Log.d("MapViewModel", "Dismissing node info dialog.")
+        _uiState.update { it.copy(selectedNodeInfo = null) }
+    }
+
     // --- Factory for instantiation ---
     companion object {
         fun provideFactory(
             context: Context,
             username: String
-            // In real DI, inject instances here
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
                 if (modelClass.isAssignableFrom(MapViewModel::class.java)) {
                     // Instantiate dependencies here if not using DI
                     val mapRepo = MapRepositoryImpl(AirportMapDataSource(context))
-                    val ticketRepo = MockTicketRepository()
+                    val ticketRepo = MockTicketRepository() // Use non-mock if available
                     val connectivitySvc = ConnectivityService(context)
                     val locationSvc = LocationService(context)
                     val ttsSvc = TextToSpeechService(context)

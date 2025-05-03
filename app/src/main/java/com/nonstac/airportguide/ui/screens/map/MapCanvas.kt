@@ -1,8 +1,8 @@
 package com.nonstac.airportguide.ui.screens.map
 
-import android.graphics.Paint
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
@@ -11,16 +11,26 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.dp
 import com.nonstac.airportguide.data.model.AirportMap
 import com.nonstac.airportguide.data.model.Node
 import com.nonstac.airportguide.data.model.NodeType
 import com.nonstac.airportguide.ui.theme.*
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.pow
+
+// Define constants for radii
+private val NODE_RADIUS: Dp = 12.dp
+private val HIGHLIGHTED_RADIUS: Dp = 18.dp
+private val HIGHLIGHTED_BORDER_WIDTH: Dp = 6.dp
+private const val CLICK_RADIUS_MULTIPLIER = 1.8f // Make clickable area larger than visual radius
+
 
 @Composable
 fun MapCanvas(
@@ -30,28 +40,46 @@ fun MapCanvas(
     path: List<Node>?,
     currentFloor: Int,
     isBlackout: Boolean,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onNodeClick: (Node) -> Unit // Add callback for node clicks
 ) {
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
-    val nodesById = remember(map) { map?.nodes?.associateBy { it.id } ?: emptyMap() }
-    val edgesByFromId = remember(map) { map?.edges?.groupBy { it.from } ?: emptyMap() }
+    val density = LocalDensity.current
 
-    // Filter nodes and edges for the current floor
+    val nodesById = remember(map) { map?.nodes?.associateBy { it.id } ?: emptyMap() }
+
     val floorNodes = remember(nodesById, currentFloor) {
         nodesById.values.filter { it.floor == currentFloor }
     }
+
+    // Pre-calculate radii in pixels based on density
+    val nodeRadiusPx = remember(density) { with(density) { NODE_RADIUS.toPx() } }
+    val highlightedRadiusPx = remember(density) { with(density) { HIGHLIGHTED_RADIUS.toPx() } }
+    val clickRadiusBasePx = remember(nodeRadiusPx, highlightedRadiusPx) {
+        max(nodeRadiusPx, highlightedRadiusPx) * CLICK_RADIUS_MULTIPLIER
+    }
+    val highlightedBorderWidthPx = remember(density) { with(density) { HIGHLIGHTED_BORDER_WIDTH.toPx() } }
+
+    // --- Moved Calculations Outside DrawScope ---
+    // Calculate floorEdges using remember in the Composable scope
     val floorEdges = remember(map, currentFloor, nodesById) {
         map?.edges?.filter { edge ->
-            val fromNode = nodesById[edge.from]
-            val toNode = nodesById[edge.to]
-            // Only draw edge if both nodes are on the current floor OR it's a stair connection involving this floor
-            (fromNode?.floor == currentFloor && toNode?.floor == currentFloor) ||
-                    (edge.stairs && (fromNode?.floor == currentFloor || toNode?.floor == currentFloor)) // Show stair nodes
+            val fromNodeLocal = nodesById[edge.from]
+            val toNodeLocal = nodesById[edge.to]
+            // Draw edge if both nodes are on the current floor OR it's a stair connection involving this floor (to show stair nodes)
+            (fromNodeLocal?.floor == currentFloor && toNodeLocal?.floor == currentFloor) ||
+                    (edge.stairs && (fromNodeLocal?.floor == currentFloor || toNodeLocal?.floor == currentFloor))
         } ?: emptyList()
     }
+
+    // Calculate floorPath using remember in the Composable scope
     val floorPath = remember(path, currentFloor) {
-        path?.filter { it.floor == currentFloor }
+        path?.filter { node -> node.floor == currentFloor }
     }
+
+    // Get icon color in the Composable scope
+    val specialIconColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+    // --- End Moved Calculations ---
 
 
     Canvas(
@@ -59,36 +87,85 @@ fun MapCanvas(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface)
             .onSizeChanged { canvasSize = it }
-    ) {
+            .pointerInput(floorNodes, canvasSize, nodesById, currentFloor, map, onNodeClick) { // Update dependencies
+                detectTapGestures(
+                    onTap = { clickOffset ->
+                        // Keep floorNodes read from the outer scope
+                        if (map == null || floorNodes.isEmpty() || canvasSize == IntSize.Zero) return@detectTapGestures
+
+                        // --- Inverse Calculation (Recalculate scale/offset based on current tap size) ---
+                        val padding = 60f
+                        val availableWidth = size.width - 2 * padding
+                        val availableHeight = size.height - 2 * padding
+
+                        val minX = floorNodes.minOfOrNull { node -> node.x }?.toFloat() ?: 0f
+                        val maxX = floorNodes.maxOfOrNull { node -> node.x }?.toFloat() ?: 1f
+                        val minY = floorNodes.minOfOrNull { node -> node.y }?.toFloat() ?: 0f
+                        val maxY = floorNodes.maxOfOrNull { node -> node.y }?.toFloat() ?: 1f
+
+                        val mapWidth = max(1f, maxX - minX)
+                        val mapHeight = max(1f, maxY - minY)
+
+                        val scaleX = if (mapWidth > 0) availableWidth / mapWidth else 1f
+                        val scaleY = if (mapHeight > 0) availableHeight / mapHeight else 1f
+                        val scale = min(scaleX, scaleY) * 0.95f
+
+                        val scaledMapWidth = mapWidth * scale
+                        val scaledMapHeight = mapHeight * scale
+                        val offsetX = padding + (availableWidth - scaledMapWidth) / 2f
+                        val offsetY = padding + (availableHeight - scaledMapHeight) / 2f
+                        // --- End Recalculation ---
+
+
+                        // Find clicked node
+                        var clickedNode: Node? = null
+                        val clickRadiusSquared = clickRadiusBasePx.pow(2) // Use squared distance
+
+                        for (node in floorNodes.reversed()) { // Iterate potential targets
+                            // Calculate node's position on canvas using the same logic as drawing
+                            val nodeCanvasX = offsetX + (node.x - minX) * scale
+                            val nodeCanvasY = offsetY + (node.y - minY) * scale
+
+                            val distanceSquared = (clickOffset.x - nodeCanvasX).pow(2) +
+                                    (clickOffset.y - nodeCanvasY).pow(2)
+
+                            if (distanceSquared <= clickRadiusSquared) {
+                                clickedNode = node
+                                break // Found the topmost node
+                            }
+                        }
+
+                        clickedNode?.let(onNodeClick) // Notify using function reference
+                    }
+                )
+            }
+    ) { // Start of DrawScope - THIS IS NOT @Composable
         if (map == null || floorNodes.isEmpty() || canvasSize == IntSize.Zero) {
-            // Draw loading or empty state if needed
             return@Canvas
         }
 
-        // --- Calculate Scaling and Offset ---
-        val padding = 60f // Padding around the map edges in pixels
+        // --- Calculate Scaling and Offset (Same logic as in pointerInput) ---
+        // This calculation needs to be done inside DrawScope because it depends on `size`
+        val padding = 60f
         val availableWidth = size.width - 2 * padding
         val availableHeight = size.height - 2 * padding
-
-        val minX = floorNodes.minOfOrNull { it.x }?.toFloat() ?: 0f
-        val maxX = floorNodes.maxOfOrNull { it.x }?.toFloat() ?: 1f
-        val minY = floorNodes.minOfOrNull { it.y }?.toFloat() ?: 0f
-        val maxY = floorNodes.maxOfOrNull { it.y }?.toFloat() ?: 1f
-
+        // Use floorNodes from the outer scope
+        val minX = floorNodes.minOfOrNull { node -> node.x }?.toFloat() ?: 0f
+        val maxX = floorNodes.maxOfOrNull { node -> node.x }?.toFloat() ?: 1f
+        val minY = floorNodes.minOfOrNull { node -> node.y }?.toFloat() ?: 0f
+        val maxY = floorNodes.maxOfOrNull { node -> node.y }?.toFloat() ?: 1f
         val mapWidth = max(1f, maxX - minX)
         val mapHeight = max(1f, maxY - minY)
-
-        val scaleX = availableWidth / mapWidth
-        val scaleY = availableHeight / mapHeight
-        val scale = min(scaleX, scaleY) * 0.95f // Use slightly smaller scale to ensure fit
-
-        // Center the map
+        val scaleX = if (mapWidth > 0) availableWidth / mapWidth else 1f
+        val scaleY = if (mapHeight > 0) availableHeight / mapHeight else 1f
+        val scale = min(scaleX, scaleY) * 0.95f
         val scaledMapWidth = mapWidth * scale
         val scaledMapHeight = mapHeight * scale
         val offsetX = padding + (availableWidth - scaledMapWidth) / 2f
         val offsetY = padding + (availableHeight - scaledMapHeight) / 2f
+        // --- End Calculation ---
 
-        // Helper function to transform map coordinates to canvas coordinates
+        // Helper function (closure captures scale, offsetX, offsetY, minX, minY)
         fun Node.toOffset(): Offset {
             val canvasX = offsetX + (this.x - minX) * scale
             val canvasY = offsetY + (this.y - minY) * scale
@@ -100,14 +177,14 @@ fun MapCanvas(
         val pathStrokeWidth = 10f
         val dashedPathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 10f), 0f)
 
+        // Use floorEdges calculated outside DrawScope
         floorEdges.forEach { edge ->
-            val fromNode = nodesById[edge.from]
-            val toNode = nodesById[edge.to]
-            if (fromNode != null && toNode != null) {
-                // Only draw if both ends are on the current floor for regular edges
-                if (fromNode.floor == currentFloor && toNode.floor == currentFloor) {
-                    val startOffset = fromNode.toOffset()
-                    val endOffset = toNode.toOffset()
+            val fromNodeLocal = nodesById[edge.from] // nodesById from outer scope
+            val toNodeLocal = nodesById[edge.to]
+            if (fromNodeLocal != null && toNodeLocal != null) {
+                if (fromNodeLocal.floor == currentFloor && toNodeLocal.floor == currentFloor) {
+                    val startOffset = fromNodeLocal.toOffset()
+                    val endOffset = toNodeLocal.toOffset()
                     drawLine(
                         color = EdgeColorDefault,
                         start = startOffset,
@@ -116,15 +193,19 @@ fun MapCanvas(
                         pathEffect = if (edge.stairs) dashedPathEffect else null
                     )
                 }
+                // Optionally draw partial lines or just nodes for stairs connecting floors
             }
         }
 
         // --- Draw Path ---
+        // Use floorPath calculated outside DrawScope
         if (!floorPath.isNullOrEmpty() && floorPath.size >= 2) {
             for (i in 0 until floorPath.size - 1) {
                 val pathNode1 = floorPath[i]
                 val pathNode2 = floorPath[i+1]
-                val edgeInfo = map.edges.find { (it.from == pathNode1.id && it.to == pathNode2.id) || (it.from == pathNode2.id && it.to == pathNode1.id) }
+                val edgeInfo = map.edges.find { // map from outer scope
+                    (it.from == pathNode1.id && it.to == pathNode2.id) || (it.from == pathNode2.id && it.to == pathNode1.id)
+                }
                 drawLine(
                     color = PathColor,
                     start = pathNode1.toOffset(),
@@ -137,70 +218,63 @@ fun MapCanvas(
         }
 
 
-        // --- Draw Nodes ---
-        val nodeRadius = 12f
-        val highlightedRadius = 18f
-        val highlightedBorderWidth = 6f
-
-
-        floorNodes.forEach { node  ->
+        // --- Draw Nodes --- (Use floorNodes from outer scope)
+        floorNodes.forEach { node ->
             val offset = node.toOffset()
             val isCurrent = node.id == currentLocationNodeId
             val isDestination = node.id == destinationNodeId
 
-            val radius = if (isCurrent || isDestination) highlightedRadius else nodeRadius
-            val color = when {
-                isCurrent -> NodeColorCurrentLocation
-                isDestination -> NodeColorDestination // Keep destination distinct
-                else -> getNodeColor(node.type)
-            }
+            val radiusPx = if (isCurrent || isDestination) highlightedRadiusPx else nodeRadiusPx
+            val nodeColor = getNodeColor(node.type)
 
-            // Draw border for current/destination
+            // Draw border/highlight effect
             if (isCurrent) {
                 drawCircle(
-                    color = NodeColorCurrentLocation.copy(alpha=0.4f),
-                    radius = radius + highlightedBorderWidth + 4f,
+                    color = NodeColorCurrentLocation.copy(alpha = 0.3f),
+                    radius = radiusPx + highlightedBorderWidthPx + 4f,
                     center = offset
                 )
                 drawCircle(
                     color = NodeColorCurrentLocation,
-                    radius = radius + highlightedBorderWidth,
+                    radius = radiusPx + highlightedBorderWidthPx,
                     center = offset
                 )
-            } else if(isDestination) {
+            } else if (isDestination) {
                 drawCircle(
-                    color = NodeColorDestination,
-                    radius = radius + highlightedBorderWidth,
+                    color = NodeColorDestination.copy(alpha = 0.8f),
+                    radius = radiusPx + highlightedBorderWidthPx,
                     center = offset
                 )
             }
 
-
             // Draw main node circle
             drawCircle(
-                color = color,
-                radius = radius,
+                color = nodeColor,
+                radius = radiusPx,
                 center = offset
             )
 
-            drawSpecialIconForNode(node, offset, nodeRadius,this)
+            // Draw special icons using the color fetched outside DrawScope
+            if (node.name.contains("Stairs", ignoreCase = true) || node.name.contains("Elevator", ignoreCase = true)) {
+                drawCircle(
+                    color = specialIconColor, // Use the pre-fetched color
+                    radius = nodeRadiusPx * 0.4f,
+                    center = offset.copy(y = offset.y - nodeRadiusPx * 0.8f)
+                )
+            }
         }
+
+        // --- Draw Blackout Overlay ---
         if (isBlackout) {
-            drawRect(color = BlackoutOverlay)
+            drawRect(
+                color = BlackoutOverlay,
+                size = size
+            )
         }
-    }
-
+    } // End of DrawScope
 }
 
-
-private fun drawSpecialIconForNode(node: Node, offset: Offset, nodeRadius: Float, drawScope: DrawScope) {
-    if (node.name.contains("Stairs", ignoreCase = true) || node.name.contains("Elevator", ignoreCase = true)) {
-        val iconRadius = nodeRadius * 0.4f
-        val iconOffset = nodeRadius * 0.8f
-        drawScope.drawCircle(center = offset.copy(y = offset.y - iconOffset), radius = iconRadius, color = Color.Gray.copy(0.4f))
-    }
-}
-
+// Helper function remains the same
 private fun getNodeColor(type: NodeType): Color {
     return when (type) {
         NodeType.ENTRANCE -> NodeColorEntrance
