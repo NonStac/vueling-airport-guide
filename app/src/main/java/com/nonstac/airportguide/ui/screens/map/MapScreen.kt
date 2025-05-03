@@ -368,10 +368,8 @@ fun NodeDropdown(
     modifier: Modifier = Modifier
 ) {
     var expanded by remember { mutableStateOf(false) }
-    // Find the node object corresponding to the selected ID for display
     val selectedNode = options.find { it.id == selectedNodeId }
-    // Display node name or placeholder text like "Select..."
-    val selectedText = selectedNode?.name ?: "" // Or use "Select..." if empty
+    val selectedText = selectedNode?.name ?: ""
 
     ExposedDropdownMenuBox(
         expanded = expanded,
@@ -380,35 +378,36 @@ fun NodeDropdown(
     ) {
         OutlinedTextField(
             value = selectedText,
-            onValueChange = {}, // Text input not changed directly
+            onValueChange = {},
             readOnly = true,
             label = { Text(label) },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-            // Important for positioning the dropdown below the text field
-            modifier = Modifier.menuAnchor()
+            modifier = Modifier.menuAnchor() // Important for positioning
         )
         ExposedDropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false }
         ) {
-            // Option to clear selection
             DropdownMenuItem(
                 text = { Text("None", style = MaterialTheme.typography.bodyLarge) },
                 onClick = {
-                    onNodeSelected(null) // Pass null when "None" is selected
+                    onNodeSelected(null)
                     expanded = false
-                }
+                },
+                contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding, // Use default padding
             )
-            // Add items for each selectable node
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 8.dp)) // Add some horizontal padding
+
             options.forEach { node ->
                 DropdownMenuItem(
                     text = { Text(node.name, style = MaterialTheme.typography.bodyLarge) },
                     onClick = {
-                        onNodeSelected(node.id) // Pass the selected node's ID
+                        onNodeSelected(node.id)
                         expanded = false
                     },
-                    contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding,
+                    contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding, // Use default padding
                 )
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 8.dp)) // Add some horizontal padding
             }
         }
     }
