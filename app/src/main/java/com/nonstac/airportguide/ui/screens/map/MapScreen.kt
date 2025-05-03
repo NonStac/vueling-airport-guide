@@ -226,6 +226,8 @@ fun NodeInfoDialog(
                     NodeType.EMERGENCY_EXIT -> Icon(Icons.Filled.ExitToApp, contentDescription = "Exit")
                     NodeType.ENTRANCE -> Icon(Icons.Filled.DoorFront, contentDescription = "Entrance")
                     NodeType.WAYPOINT -> Icon(Icons.Filled.Place, contentDescription = "Waypoint")
+                    NodeType.STAIRS_ELEVATOR -> { /* Render Nothing */ }
+                    NodeType.CONNECTION -> { /* Render Nothing */ }
                 }
             },
             title = { Text(text = node.name, fontWeight = FontWeight.Bold) },
