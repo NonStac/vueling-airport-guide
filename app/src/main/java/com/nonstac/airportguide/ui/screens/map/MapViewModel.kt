@@ -207,6 +207,57 @@ class MapViewModel(
         }
     }
 
+    // --- NEW FUNCTION: Set current location from dialog button ---
+    fun setCurrentNodeFromDialog(node: Node) {
+        Log.d(TAG, "Setting current node from dialog: ${node.id}")
+
+        val newStateUpdate =
+            { currentState: MapUiState -> currentState.copy(currentLocationNodeId = node.id) }
+
+        // Check if floor needs changing
+        if (node.floor != _uiState.value.currentFloor) {
+            changeFloor(node.floor) // This might reset path/destination depending on its implementation
+            // Apply the node ID update *after* potential floor change effects
+            _uiState.update(newStateUpdate)
+            updateStatus("Switched to Floor ${node.floor} and set location: ${node.name}")
+            speak("Okay, moved to floor ${node.floor} and set your location to ${node.name}.")
+
+        } else {
+            _uiState.update(newStateUpdate)
+            updateStatus("Current location set to: ${node.name}")
+            speak("Okay, location set to ${node.name}.")
+        }
+
+
+        // If a destination is already set, consider recalculating the path
+        val destId = _uiState.value.destinationNodeId
+        if (destId != null && destId != node.id) {
+            Log.d(TAG, "Current location changed with active destination, recalculating path.")
+            speak("Recalculating route from your new location.")
+            findAndSetPath(node.id, destId) // Recalculate
+        }
+    }
+
+    // --- NEW FUNCTION: Set destination from dialog button ---
+    fun setDestinationNodeFromDialog(node: Node) {
+        Log.d(TAG, "Setting destination node from dialog: ${node.id}")
+        val startNodeId = _uiState.value.currentLocationNodeId
+        if (startNodeId == null) {
+            speak("Okay, destination set to ${node.name}. Please also set your current location or use voice commands.")
+            // Update destination but don't calculate path yet
+            _uiState.update { it.copy(destinationNodeId = node.id) }
+            updateStatus("Destination set: ${node.name}. Set current location to find path.")
+        } else if (startNodeId == node.id) {
+            speak("Current location and destination cannot be the same.")
+            updateStatus("Cannot set destination to current location.")
+        } else {
+            speak("Okay, setting destination to ${node.name} and calculating route.")
+            // Update destination and trigger pathfinding
+            _uiState.update { it.copy(isProcessing = true) } // Show processing indicator
+            findAndSetPath(startNodeId, node.id) // This will update state and clear processing flag
+        }
+    }
+
     private fun requestInitialLocation() {
         if (uiState.value.permissionsGranted[Manifest.permission.ACCESS_FINE_LOCATION] == true) {
             viewModelScope.launch {
