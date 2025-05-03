@@ -201,14 +201,14 @@ class MapViewModel(
         if (locationUpdateJob?.isActive == true) return // Already running
         if (uiState.value.permissionsGranted[Manifest.permission.ACCESS_FINE_LOCATION] == true) {
             Log.d("MapViewModel", "Starting location updates flow.")
-            locationUpdateJob = locationService.requestLocationUpdates()
-                // Using .catch is important for flow cancellation/errors
-                .catch { e ->
-                    Log.e("MapViewModel", "Location updates error", e)
-                    showError("Location updates failed: ${e.message}")
-                    _uiState.update { it.copy(isLoadingLocation = false) }
-                }
-                .launchIn(viewModelScope) // Collects implicitly
+//            locationUpdateJob = locationService.requestLocationUpdates()
+//                // Using .catch is important for flow cancellation/errors
+//                .catch { e ->
+//                    Log.e("MapViewModel", "Location updates error", e)
+//                    showError("Location updates failed: ${e.message}")
+//                    _uiState.update { it.copy(isLoadingLocation = false) }
+//                }
+//                .launchIn(viewModelScope) // Collects implicitly
         } else {
             Log.w("MapViewModel", "Cannot start location updates, permission missing.")
         }
@@ -508,7 +508,7 @@ class MapViewModel(
 
         viewModelScope.launch {
             val pathResult = AStar.findPath(startNodeId, destinationNodeId, currentMap)
-            if (pathResult != null && pathResult.isNotEmpty()) {
+            if (!pathResult.isNullOrEmpty()) {
                 Log.d("MapViewModel", "Path found with ${pathResult.size} nodes.")
                 _uiState.update {
                     it.copy(
@@ -618,7 +618,7 @@ class MapViewModel(
             currentKnownLocationId = state.currentLocationNodeId,
             currentDestinationId = state.destinationNodeId,
             userFlightGate = state.userFlightGate, // Pass the fetched gate info
-            isPathActive = state.currentPath != null && state.currentPath.isNotEmpty()
+            isPathActive = !state.currentPath.isNullOrEmpty()
         )
     }
 
@@ -629,7 +629,7 @@ class MapViewModel(
             Log.d("MapViewModel", "Changing floor view to $newFloor")
             _uiState.update { it.copy(currentFloor = newFloor) }
             // When floor changes, re-evaluate the nearest node based on GPS if available
-            uiState.value.currentLocation?.let { loc -> findAndSetNearestNode(loc) }
+//            uiState.value.currentLocation?.let { loc -> findAndSetNearestNode(loc) }
             // Clear path/destination if they are not relevant to the new floor? Optional.
             // _uiState.update { it.copy(currentPath = null, destinationNodeId = null) }
         }
