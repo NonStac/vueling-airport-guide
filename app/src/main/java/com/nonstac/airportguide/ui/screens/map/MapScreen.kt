@@ -19,8 +19,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nonstac.airportguide.data.model.Node // Ensure Node is imported
 import com.nonstac.airportguide.data.model.NodeType
-import com.nonstac.airportguide.util.PermissionsHandler
+import com.nonstac.airportguide.util.PermissionsHandler // Keep this if used elsewhere, otherwise check direct state
 import com.nonstac.airportguide.ui.theme.VuelingYellow
+import android.util.Log // Import Log
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -30,7 +31,7 @@ fun MapScreen(
     mapViewModel: MapViewModel = viewModel(factory = MapViewModel.provideFactory(LocalContext.current, username))
 ) {
     val uiState by mapViewModel.uiState.collectAsStateWithLifecycle()
-    val context = LocalContext.current
+    val context = LocalContext.current // Context needed? Maybe not if PermissionsHandler is removed
 
     // --- Permission Launchers ---
     val locationPermissionLauncher = rememberLauncherForActivityResult(
@@ -39,33 +40,26 @@ fun MapScreen(
         // Check if FINE location was granted specifically
         val fineLocationGranted = permissions.getOrDefault(Manifest.permission.ACCESS_FINE_LOCATION, false)
         mapViewModel.onPermissionResult(Manifest.permission.ACCESS_FINE_LOCATION, fineLocationGranted)
-        // Optionally check COARSE if needed, but FINE is preferred
-        // val coarseLocationGranted = permissions.getOrDefault(Manifest.permission.ACCESS_COARSE_LOCATION, false)
-        // mapViewModel.onPermissionResult(Manifest.permission.ACCESS_COARSE_LOCATION, coarseLocationGranted)
     }
 
     val audioPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         mapViewModel.onPermissionResult(Manifest.permission.RECORD_AUDIO, isGranted)
-        if (isGranted) {
-            // Automatically start listening after permission granted if desired
-            // mapViewModel.startListening()
-        } else {
-            // Optionally show a snackbar message explaining why permission is needed
-            // mapViewModel.showError("Audio permission needed for voice commands.")
-        }
+        // No automatic action needed here after grant, user must tap again
     }
 
     // --- Request permissions on screen launch if not already granted ---
     LaunchedEffect(Unit) {
-        if (!PermissionsHandler.hasLocationPermissions(context)) {
+        // Check and request location permission
+        val locationPermissionNeeded = !PermissionsHandler.hasLocationPermissions(context) // Assuming PermissionsHandler exists and is correct
+        if (locationPermissionNeeded) {
             locationPermissionLauncher.launch(PermissionsHandler.locationPermissions)
         } else {
-            // Notify ViewModel it already has permission to start location updates
             mapViewModel.onPermissionResult(Manifest.permission.ACCESS_FINE_LOCATION, true)
         }
-        // Audio permission is requested on demand when FAB is clicked
+        // Update ViewModel with current audio permission status (important!)
+        mapViewModel.onPermissionResult(Manifest.permission.RECORD_AUDIO, PermissionsHandler.hasAudioPermission(context))
     }
 
     // --- UI Scaffold ---
@@ -78,28 +72,24 @@ fun MapScreen(
                     titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
                 ),
                 actions = {
-                    // Floor Switcher
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        val minFloor = uiState.airportMap?.nodes?.minOfOrNull { it.floor } ?: 1
-                        val maxFloor = uiState.airportMap?.nodes?.maxOfOrNull { it.floor } ?: 1
+                        val minFloor = remember(uiState.airportMap) { uiState.airportMap?.nodes?.minOfOrNull { it.floor } ?: 1 }
+                        val maxFloor = remember(uiState.airportMap) { uiState.airportMap?.nodes?.maxOfOrNull { it.floor } ?: 1 }
 
                         Text("Floor: ${uiState.currentFloor}", modifier = Modifier.padding(end = 8.dp))
-                        // Go Down Button
                         IconButton(
                             onClick = { mapViewModel.changeFloor(uiState.currentFloor - 1) },
-                            enabled = uiState.currentFloor > minFloor // Enable if not on the lowest floor
+                            enabled = uiState.currentFloor > minFloor
                         ) {
                             Icon(Icons.Default.ArrowDownward, contentDescription = "Go Down One Floor")
                         }
-                        // Go Up Button
                         IconButton(
                             onClick = { mapViewModel.changeFloor(uiState.currentFloor + 1) },
-                            enabled = uiState.currentFloor < maxFloor // Enable if not on the highest floor
+                            enabled = uiState.currentFloor < maxFloor
                         ) {
                             Icon(Icons.Default.ArrowUpward, contentDescription = "Go Up One Floor")
                         }
                     }
-                    // Navigate to Tickets Button
                     IconButton(onClick = onNavigateToTickets) {
                         Icon(Icons.AutoMirrored.Filled.AirplaneTicket, contentDescription = "View Tickets")
                     }
@@ -107,20 +97,24 @@ fun MapScreen(
             )
         },
         floatingActionButton = {
-            // Voice Input FAB
             FloatingActionButton(
                 onClick = {
-                    if (PermissionsHandler.hasAudioPermission(context)) {
-                        mapViewModel.startListening()
+                    // --- MODIFIED onClick LOGIC ---
+                    // Check permission directly from the ViewModel state
+                    if (uiState.permissionsGranted[Manifest.permission.RECORD_AUDIO] == true) {
+                        // Permission granted: Call the ViewModel function that stops TTS and starts ASR
+                        Log.d("MapScreen", "FAB Clicked: Permission OK, calling interruptSpeechAndListen.")
+                        mapViewModel.interruptSpeechAndListen() // <<<<<<< CALL THIS FUNCTION
                     } else {
-                        // Request permission if not granted
-                        audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        // Permission not granted: Launch the permission request
+                        Log.d("MapScreen", "FAB Clicked: Permission needed, launching request.")
+                        audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) // <<<<<<< LAUNCH PERMISSION REQUEST
                     }
+                    // --- END OF MODIFIED onClick LOGIC ---
                 },
                 containerColor = VuelingYellow,
                 contentColor = MaterialTheme.colorScheme.onPrimaryContainer
             ) {
-                // Show progress indicator while listening
                 if (uiState.isListening) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(24.dp),
@@ -128,27 +122,22 @@ fun MapScreen(
                         color = MaterialTheme.colorScheme.primary
                     )
                 } else {
-                    // Show mic icon otherwise
                     Icon(Icons.Filled.Mic, contentDescription = "Start Voice Command")
                 }
             }
         },
         snackbarHost = { SnackbarHost(hostState = mapViewModel.snackbarHostState) }
     ) { paddingValues ->
-        // --- Main Content Area ---
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(paddingValues) // Apply padding from scaffold
+                .padding(paddingValues)
         ) {
-            // --- Map Loading / Display ---
             when {
                 uiState.isLoadingMap -> {
-                    // Show loading indicator while map loads
                     CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
                 }
                 uiState.airportMap != null -> {
-                    // Display the MapCanvas when map is loaded
                     MapCanvas(
                         map = uiState.airportMap,
                         currentLocationNodeId = uiState.currentLocationNodeId,
@@ -157,14 +146,10 @@ fun MapScreen(
                         currentFloor = uiState.currentFloor,
                         isBlackout = uiState.isBlackout,
                         modifier = Modifier.fillMaxSize(),
-                        onNodeClick = { clickedNode ->
-                            // Call ViewModel function when a node is clicked on the canvas
-                            mapViewModel.selectNode(clickedNode)
-                        }
+                        onNodeClick = mapViewModel::selectNode // Use method reference
                     )
                 }
                 else -> {
-                    // Show error if map failed to load
                     Text(
                         "Could not load map data.",
                         modifier = Modifier.align(Alignment.Center).padding(16.dp),
@@ -175,44 +160,41 @@ fun MapScreen(
                 }
             }
 
-            // --- Status Overlay Card ---
             Card(
                 modifier = Modifier
-                    .align(Alignment.TopCenter)
+                    .align(Alignment.TopCenter) // Changed alignment to TopCenter
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp), // Adjusted padding
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
                 elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
                 colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.92f) // Slightly different color
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.92f)
                 )
             ) {
                 Column(
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    // Blackout Indicator
                     if(uiState.isBlackout) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.SignalWifiOff, contentDescription = "Blackout Active", tint = VuelingYellow)
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = "BLACKOUT MODE ACTIVE",
-                                style = MaterialTheme.typography.titleSmall, // Slightly smaller
+                                style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Bold,
                                 color = VuelingYellow,
                             )
                         }
                         Spacer(modifier = Modifier.height(4.dp))
                     }
-                    // Status Message Text
                     Text(
                         text = uiState.statusMessage ?: "Tap the mic or a map node.",
-                        style = MaterialTheme.typography.bodyMedium, // Adjusted size
+                        style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.fillMaxWidth(),
                         textAlign = TextAlign.Center,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    // Processing Indicator
+                    // Combined processing indicator for LLM or location finding
                     if (uiState.isProcessing || uiState.isLoadingLocation) {
                         Spacer(modifier = Modifier.height(8.dp))
                         LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
@@ -220,29 +202,24 @@ fun MapScreen(
                 }
             }
 
-            // --- Node Info Dialog ---
-            // This dialog will appear centered on the screen when selectedNodeInfo is not null
             NodeInfoDialog(
                 node = uiState.selectedNodeInfo,
-                onDismiss = { mapViewModel.dismissNodeInfo() } // Call VM function to dismiss
+                onDismiss = mapViewModel::dismissNodeInfo // Use method reference
             )
-            // --- End Node Info Dialog ---
 
         } // End Box
     } // End Scaffold
 }
 
-
-// --- Node Information Dialog Composable ---
 @Composable
 fun NodeInfoDialog(
-    node: Node?, // Node is nullable; dialog shows only if non-null
+    node: Node?,
     onDismiss: () -> Unit
 ) {
     if (node != null) {
         AlertDialog(
-            onDismissRequest = onDismiss, // Call lambda when user clicks outside or back button
-            icon = { // Add an icon based on node type
+            onDismissRequest = onDismiss,
+            icon = {
                 when(node.type) {
                     NodeType.GATE -> Icon(Icons.Filled.MeetingRoom, contentDescription = "Gate")
                     NodeType.BATHROOM -> Icon(Icons.Filled.Wc, contentDescription = "Bathroom")
@@ -251,26 +228,15 @@ fun NodeInfoDialog(
                     NodeType.WAYPOINT -> Icon(Icons.Filled.Place, contentDescription = "Waypoint")
                 }
             },
-            title = {
-                Text(text = node.name, fontWeight = FontWeight.Bold)
-            },
+            title = { Text(text = node.name, fontWeight = FontWeight.Bold) },
             text = {
-                // Display node details in a column
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Type: ${node.type.name.lowercase().replaceFirstChar { it.titlecase() }}") // Nicer formatting
+                    Text("Type: ${node.type.name.lowercase().replaceFirstChar { it.titlecase() }}")
                     Text("ID: ${node.id}")
                     Text("Floor: ${node.floor}")
-                    // Add more details if needed, e.g., coordinates
-                    // Text("Coordinates: (X=${node.x}, Y=${node.y})")
                 }
             },
-            confirmButton = {
-                // Simple close button
-                TextButton(onClick = onDismiss) {
-                    Text("Close")
-                }
-            }
-            // Optionally add dismissButton = { ... } if needed
+            confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } }
         )
     }
 }

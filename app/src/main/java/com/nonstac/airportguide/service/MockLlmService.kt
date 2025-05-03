@@ -1,32 +1,28 @@
 package com.nonstac.airportguide.service
 
 import com.nonstac.airportguide.data.model.LLMResponse
-import com.nonstac.airportguide.data.model.MapStateInfo // Assuming MapStateInfo has destination info
-// If MapStateInfo doesn't have destinationInfo, remove the import and the arrival check logic.
-// You might need to define destinationInfo within MapStateInfo as suggested in previous comments.
+import com.nonstac.airportguide.data.model.MapStateInfo
 import kotlinx.coroutines.delay
 import java.util.Locale
 import kotlin.math.min
 import kotlin.math.abs
 
-// Service to process user input, with fuzzy matching, compound queries (revised), and arrival detection.
+// Service to process user input, with fuzzy matching and intent detection.
+// NOTE: Compound queries (location + navigation in one sentence) are intentionally NOT supported.
+// Handles specific location/bathroom/exit requests first, falls back to nearest if specific parse fails.
+// Uses a stricter fuzzy match distance (1) and a cleaned list of known locations based on the provided map.
 class MockLlmService {
 
-    // --- Keyword Sets, Maps, Regex (largely unchanged) ---
+    // --- Keyword Sets, Maps, Regex ---
     private val locationUpdateTriggers = setOf(
         "i am at", "i'm at", "my location is", "currently at",
         "located at", "presently at", "find me at", "here at",
         "i am near", "i'm near", "i am next to", "i'm next to"
     )
-    // Added more conjunctions to potentially split compound queries during extraction
     private val navigationTriggers = setOf(
         "how do i get to", "how do you get to",
         "take me to", "go to", "where is", "directions to", "path to",
-        "which way to", "navigate to", "show me", "guide me to", "lead me to",
-        // Conjunctions signalling navigation after something else
-        "and i want to go to", "and i want directions to", "and i need to get to",
-        "and take me to", "and where is", "and how do i get to",
-        ", take me to", ", go to", ", directions to" // Comma variations
+        "which way to", "navigate to", "show me", "guide me to", "lead me to"
     )
     private val distanceTriggers = setOf(
         "how far", "distance left", "how long", "time left",
@@ -42,145 +38,153 @@ class MockLlmService {
         "what should i do now", "where should i go now",
         "confused about where to go", "what's next", "where to next"
     )
+    // General keywords used for FALLBACK "nearest" detection ONLY if specific parsing fails
     private val bathroomKeywords = setOf("bathroom", "restroom", "toilet", "wc", "washroom", "lavatory", "loo")
     private val exitKeywords = setOf("exit", "emergency exit", "way out", "emergency door")
 
+    // *** MODIFIED knownLocations: Cleaned to match only JSON map elements ***
+    // Aliases map to canonical names from the JSON 'name' field.
+    // Keys here should generally use words (like "second") as input is pre-processed before matching.
     private val knownLocations: Map<String, String> = mapOf(
-        "security checkpoint" to "Security Checkpoint", "security check point" to "Security Checkpoint", "security" to "Security Checkpoint",
-        "check in desk" to "Check-in Desk", "check in" to "Check-in Desk", "checkin desk" to "Check-in Desk", "checkin" to "Check-in Desk",
-        "desk" to "Desk", "counter" to "Counter", "terminal" to "Terminal", "zone" to "Zone", "area" to "Area", "level" to "Level", "floor" to "Floor",
-        "entrance" to "Entrance", "exit" to "Exit",
-        "duty free" to "Duty Free", "dutyfree" to "Duty Free", "duty free shop" to "Duty Free", "dutyfree shop" to "Duty Free",
-        "lounge" to "Lounge", "information" to "Information Desk", "information desk" to "Information Desk",
-        "baggage claim" to "Baggage Claim", "food court" to "Food Court", "cafe" to "Cafe", "restaurant" to "Restaurant"
+        // Base type for numbered location PRESENT in JSON
+        "security checkpoint" to "Security Checkpoint", // Base for "Security Checkpoint 1"
+
+        // Specific Locations from JSON map
+        "entrance" to "Main Entrance",
+        "main entrance" to "Main Entrance",
+
+        "check-in area a" to "Check-in Area A", // Specific area from JSON
+        "check in area a" to "Check-in Area A",
+        "checkin area a" to "Check-in Area A",
+        "area a check in" to "Check-in Area A",
+        "area a" to "Check-in Area A", // Might be ambiguous, test usage
+
+        "security checkpoint 1" to "Security Checkpoint 1", // Specific numbered location
+        "security 1" to "Security Checkpoint 1",
+        "checkpoint 1" to "Security Checkpoint 1",
+
+        "duty free" to "Duty Free Shop", // Specific shop
+        "dutyfree" to "Duty Free Shop",
+        "duty-free" to "Duty Free Shop",
+        "duty free shop" to "Duty Free Shop",
+        "dutyfree shop" to "Duty Free Shop",
+        "duty-free shop" to "Duty Free Shop",
+
+        "lounge" to "VIP Lounge", // Specific lounge
+        "vip lounge" to "VIP Lounge",
+
+        "stairs/elevator to floor 2" to "Stairs/Elevator to Floor 2", // Specific connection point
+        "stairs to floor 2" to "Stairs/Elevator to Floor 2",
+        "elevator to floor 2" to "Stairs/Elevator to Floor 2",
+        "stairs up" to "Stairs/Elevator to Floor 2",
+
+        "stairs/elevator from floor 1" to "Stairs/Elevator from Floor 1", // Specific connection point
+        "stairs from floor 1" to "Stairs/Elevator from Floor 1",
+        "elevator from floor 1" to "Stairs/Elevator from Floor 1",
+
+        // Specific Bathrooms (Aliases use words - input is pre-processed to digits before lookup)
+        "restrooms near duty free" to "Restrooms near Duty Free", // B1
+        "bathroom near duty free" to "Restrooms near Duty Free",
+        "bathroom 1" to "Restrooms near Duty Free", // Matches pre-processed "1 bathroom" or "bathroom 1"
+        "restroom 1" to "Restrooms near Duty Free",
+        "first bathroom" to "Restrooms near Duty Free", // Matches pre-processed "1 bathroom"
+        "1st bathroom" to "Restrooms near Duty Free", // Matches pre-processed "1 bathroom"
+
+        "restrooms near gates b" to "Restrooms near Gates B", // B2
+        "bathroom near gates b" to "Restrooms near Gates B",
+        "restrooms near gate b" to "Restrooms near Gates B",
+        "bathroom near gate b" to "Restrooms near Gates B",
+        "bathroom 2" to "Restrooms near Gates B", // Matches pre-processed "2 bathroom" or "bathroom 2"
+        "restroom 2" to "Restrooms near Gates B",
+        "second bathroom" to "Restrooms near Gates B", // Matches pre-processed "2 bathroom"
+        "2nd bathroom" to "Restrooms near Gates B", // Matches pre-processed "2 bathroom"
+
+        "restrooms floor 2" to "Restrooms Floor 2", // B3
+        "bathroom floor 2" to "Restrooms Floor 2",
+        "restroom floor 2" to "Restrooms Floor 2",
+        "bathroom on floor 2" to "Restrooms Floor 2",
+        "restroom on floor 2" to "Restrooms Floor 2",
+        "bathroom on the second floor" to "Restrooms Floor 2", // Matches pre-processed "bathroom on the 2 floor"
+        "restroom on the second floor" to "Restrooms Floor 2",
+        "second floor bathroom" to "Restrooms Floor 2",         // Matches pre-processed "2 floor bathroom"
+        "second floor restroom" to "Restrooms Floor 2",
+        "bathroom 3" to "Restrooms Floor 2", // Matches pre-processed "3 bathroom" or "bathroom 3"
+        "restroom 3" to "Restrooms Floor 2",
+        "third bathroom" to "Restrooms Floor 2",             // Matches pre-processed "3 bathroom"
+        "3rd bathroom" to "Restrooms Floor 2",
+
+        // Specific Exits (Aliases use words - input is pre-processed to digits before lookup)
+        "emergency exit north" to "Emergency Exit North", // E1
+        "exit north" to "Emergency Exit North",
+        "north exit" to "Emergency Exit North",
+        "exit 1" to "Emergency Exit North", // Matches pre-processed "1 exit" or "exit 1"
+        "first exit" to "Emergency Exit North",           // Matches pre-processed "1 exit"
+        "1st exit" to "Emergency Exit North",
+
+        "emergency exit floor 2" to "Emergency Exit Floor 2", // E2
+        "exit floor 2" to "Emergency Exit Floor 2",
+        "floor 2 exit" to "Emergency Exit Floor 2",
+        "exit on floor 2" to "Emergency Exit Floor 2",
+        "exit on the second floor" to "Emergency Exit Floor 2", // Matches pre-processed "exit on the 2 floor"
+        "second floor exit" to "Emergency Exit Floor 2",       // Matches pre-processed "2 floor exit"
+        "exit 2" to "Emergency Exit Floor 2", // Matches pre-processed "2 exit" or "exit 2"
+        "second exit" to "Emergency Exit Floor 2",         // Matches pre-processed "2 exit"
+        "2nd exit" to "Emergency Exit Floor 2"
+        // REMOVED: Generic concepts like Restaurant, Cafe, Baggage Claim, Info Desk, etc.
     )
 
+    // *** MODIFIED locationsExpectingNumbers: Only includes base types leading to numbered locations in JSON ***
     private val locationsExpectingNumbers: Set<String> = setOf(
-        "Security Checkpoint", "Check-in Desk", "Desk", "Counter", "Terminal", "Zone", "Area", "Level", "Floor"
+        "Security Checkpoint" // Only this base type has a numbered instance (Security Checkpoint 1) in the JSON.
     )
 
-    private val gateRegex = """(?:gate\s?)?([a-zA-Z])(\d{1,3})""".toRegex(RegexOption.IGNORE_CASE)
+    // Requires "gate" explicitly
+    private val gateRegex = """gate\s+([a-zA-Z])\s?(\d{1,3})""".toRegex(RegexOption.IGNORE_CASE)
+
+    // Ordinal words mapping used for pre-processing input
+    private val ordinalWords = mapOf(
+        "first" to "1", "second" to "2", "third" to "3", "fourth" to "4", "fifth" to "5",
+        "1st" to "1", "2nd" to "2", "3rd" to "3", "4th" to "4", "5th" to "5"
+    ). S("1", "2", "3", "4", "5") // Keep simple digits for consistency
+    private fun <T> Map<String, String>.S(vararg elements: T) = this
+    // Number words for base number extraction (e.g., Security Checkpoint one -> Security Checkpoint 1)
     private val numberWords = mapOf(
-        "one" to "1", "two" to "2", "three" to "3", "four" to "4", "five" to "5", "six" to "6", "seven" to "7", "eight" to "8", "nine" to "9", "ten" to "10",
-        "eleven" to "11", "twelve" to "12", "thirteen" to "13", "fourteen" to "14", "fifteen" to "15", "sixteen" to "16", "seventeen" to "17", "eighteen" to "18", "nineteen" to "19", "twenty" to "20"
+        "one" to "1", "two" to "2", "three" to "3", "four" to "4", "five" to "5", "six" to "6", "seven" to "7", "eight" to "8", "nine" to "9", "ten" to "10"
+        // Limited to 10 for brevity, expand if needed for Check-in Desk X, etc. if they exist
     )
-    private val numberPattern = Regex("""(\d+|${numberWords.keys.joinToString("|")})""")
-    private val fuzzyMatchMaxDistance = 2
+    // Pattern to find digits or number words for base number extraction
+    private val numberPattern = Regex("""(?<=\s|^)(\d+|${numberWords.keys.joinToString("|")})(?=\s|$)""")
+
+    // *** REDUCED fuzzyMatchMaxDistance for stricter matching ***
+    private val fuzzyMatchMaxDistance = 1
     // --- End of Keywords, Maps, Regex ---
+
+    // Helper function to pre-process text segments (lowercase + ordinals to digits)
+    private fun preprocessText(text: String?): String {
+        if (text.isNullOrBlank()) return ""
+        var processed = text.lowercase(Locale.ROOT)
+        ordinalWords.forEach { (word, digit) ->
+            // Use regex for whole word replacement to avoid partial matches (e.g., "first" in "thirsty")
+            processed = processed.replace("\\b${Regex.escape(word)}\\b".toRegex(), digit)
+        }
+        return processed
+    }
+
 
     suspend fun processUserInput(userInput: String, currentState: MapStateInfo): LLMResponse {
         delay(400) // Simulate processing time
-        val inputLower = userInput.lowercase(Locale.ROOT)
+        val originalInputLower = userInput.lowercase(Locale.ROOT) // For broad trigger matching
 
-        // Variables to store detected entities/intents
-        var detectedLocationUpdate: String? = null
-        var detectedNavigationTarget: String? = null
-        var needsNearestBathroom = false
-        var needsNearestExit = false
-        var detectedDistanceRequest = false
-        var detectedLostLocalization = false
-        var detectedConfusedNavigation = false
+        // --- Intent Prioritization ---
+        // Priority: Lost > Distance > Navigation > Location Update > Confused > Fallback
 
-        // --- Stage 1: Entity Extraction and Intent Detection (REVISED for Compound Queries) ---
-
-        var potentialLocationString: String? = null
-        var potentialDestinationString: String? = null
-
-        // A. Try to find Location Update components
-        // Find the best (longest) location trigger first
-        val locationTrigger = findTrigger(inputLower, locationUpdateTriggers)
-        var locationTriggerEndIndex = -1
-        if (locationTrigger != null) {
-            val triggerStartIndex = inputLower.indexOf(locationTrigger)
-            locationTriggerEndIndex = triggerStartIndex + locationTrigger.length
-            // Extract text immediately following the trigger
-            var rawLocationText = userInput.substring(locationTriggerEndIndex).trimStart()
-            rawLocationText = rawLocationText.removePrefix(":").trimStart() // Handle "at: location"
-
-            // Try to delimit the location phrase (e.g., stop at conjunctions or nav triggers)
-            val stopPhrases = listOf(" and ", " then ", ", ", " how do i", " take me", " where is") // Simplified delimiters
-            var stopIndex = -1
-            for (phrase in stopPhrases) {
-                val index = rawLocationText.lowercase(Locale.ROOT).indexOf(phrase)
-                if (index != -1 && (stopIndex == -1 || index < stopIndex)) {
-                    stopIndex = index
-                }
-            }
-            if (stopIndex != -1) {
-                potentialLocationString = rawLocationText.substring(0, stopIndex).trim()
-            } else {
-                potentialLocationString = rawLocationText.trim()
-            }
-            potentialLocationString = potentialLocationString?.replace(Regex("[.,!?]$"), "") // Clean end punc
-        }
-
-        // B. Try to find Navigation components (Search independently)
-        // Find the best (longest) navigation trigger
-        val navigationTrigger = findTrigger(inputLower, navigationTriggers)
-        if (navigationTrigger != null) {
-            val triggerStartIndex = inputLower.lastIndexOf(navigationTrigger) // Use lastIndexOf in case trigger appears early non-navigationally?
-            val textAfterNavTrigger = userInput.substring(triggerStartIndex + navigationTrigger.length).trimStart()
-
-            // Extract the destination phrase after the trigger
-            potentialDestinationString = textAfterNavTrigger.removePrefix("to ").removePrefix("the ").trim()
-            potentialDestinationString = potentialDestinationString.replace(Regex("[.,!?]$"), "") // Clean end punc
-
-            // Avoid grabbing location info if nav trigger appeared *before* location trigger
-            if (locationTriggerEndIndex != -1 && triggerStartIndex < locationTriggerEndIndex) {
-                // Navigation trigger appeared before the identified location trigger ended.
-                // This might be complex phrasing, e.g. "How do I get to Gate A5, I am at Security 1"
-                // In this case, potentialDestinationString might contain location info. Re-evaluate.
-                // For simplicity now, we might misinterpret this. A full parser is needed for perfect handling.
-                // Let's assume simpler "Loc -> Nav" or just "Nav" structure primarily.
-            }
-        }
-
-        // C. Parse the potential strings
-        if (!potentialLocationString.isNullOrBlank()) {
-            detectedLocationUpdate = parseLocationName(potentialLocationString)
-        }
-
-        if (!potentialDestinationString.isNullOrBlank()) {
-            val destLower = potentialDestinationString.lowercase(Locale.ROOT)
-            if (destLower.contains("my gate")) { // "my gate" requires special handling
-                if (currentState.userFlightGate != null) detectedNavigationTarget = currentState.userFlightGate
-            } else if (bathroomKeywords.any { destLower.contains(it) || isFuzzyMatchAny(potentialDestinationString, bathroomKeywords) }) {
-                needsNearestBathroom = true
-            } else if (exitKeywords.any { destLower.contains(it) || isFuzzyMatchAny(potentialDestinationString, exitKeywords) }) {
-                needsNearestExit = true
-            } else {
-                // Parse as a regular location/gate only if not a special keyword handled above
-                detectedNavigationTarget = parseLocationName(potentialDestinationString)
-            }
-        }
-
-        // D/E/F. Check other intents
-        if (distanceTriggers.any { inputLower.contains(it) }) detectedDistanceRequest = true
-        if (lostTriggers.any { inputLower.contains(it) }) detectedLostLocalization = true
-        // Check confused nav only if primary intents (loc update, navigation) weren't strongly detected
-        if (detectedLocationUpdate == null && detectedNavigationTarget == null && !needsNearestBathroom && !needsNearestExit && !detectedLostLocalization) {
-            if (confusedNavigationTriggers.any { inputLower.contains(it) }) {
-                detectedConfusedNavigation = true
-            }
-        }
-
-        // --- Stage 2: Decision Logic based on detected intents ---
-
-        // Priority Order: Lost > Arrival > Distance > Navigation > Location Update > Confused Nav > Fallback
-
-        // 1. Handle "Lost"
-        if (detectedLostLocalization) {
+        // 1. Check for Lost trigger
+        if (lostTriggers.any { originalInputLower.contains(it) }) {
             return LLMResponse.FunctionCall("localizeUser", emptyMap())
         }
 
-        // 2. Handle Arrival Check
-        val currentDestination = currentState.currentDestinationId
-        if (detectedLocationUpdate != null && currentDestination != null && detectedLocationUpdate == currentDestination) {
-            return LLMResponse.GeneralResponse("Looks like you've arrived at your destination: ${detectedLocationUpdate}!")
-        }
-
-        // 3. Handle Distance Request
-        if (detectedDistanceRequest) {
+        // 2. Check for Distance Request trigger
+        if (distanceTriggers.any { originalInputLower.contains(it) }) {
             return if (!currentState.isPathActive) {
                 LLMResponse.GeneralResponse("You don't seem to have an active route planned. To check distance, please start navigation first. Where would you like to go?")
             } else {
@@ -188,43 +192,119 @@ class MockLlmService {
             }
         }
 
-        // 4. Handle Navigation (now correctly uses variables populated by revised Stage 1)
-        val effectiveNavigationTarget = when {
-            needsNearestBathroom -> "BATHROOM"
-            needsNearestExit -> "EMERGENCY_EXIT"
-            else -> detectedNavigationTarget
-        }
+        // 3. Check for Navigation trigger
+        val navigationTrigger = findTrigger(originalInputLower, navigationTriggers)
+        if (navigationTrigger != null) {
+            // Extract the raw destination string from the ORIGINAL input
+            val triggerStartIndex = originalInputLower.lastIndexOf(navigationTrigger) // Use original case for index
+            val textAfterNavTrigger = userInput.substring(triggerStartIndex + navigationTrigger.length).trimStart()
+            var potentialDestinationStringRaw = textAfterNavTrigger.removePrefix("to ").removePrefix("the ").trim()
+            potentialDestinationStringRaw = potentialDestinationStringRaw.replace(Regex("[.,!?]$"), "")
 
-        if (effectiveNavigationTarget != null) {
-            // Location is known if already in state OR provided in this compound query
-            val locationKnown = currentState.currentKnownLocationId != null || detectedLocationUpdate != null
-            if (locationKnown) {
-                // Implicitly uses updated location if provided now. External system handles state.
-                return LLMResponse.FunctionCall("findPath", mapOf("destinationName" to effectiveNavigationTarget))
-            } else {
-                // Location unknown, ask for it.
-                val targetNameFeedback = when(effectiveNavigationTarget) {
-                    "BATHROOM" -> "the nearest bathroom"
-                    "EMERGENCY_EXIT" -> "the nearest emergency exit"
-                    currentState.userFlightGate -> "your gate ($effectiveNavigationTarget)" // Requires userFlightGate != null here
-                    else -> effectiveNavigationTarget
+            // Pre-process the extracted destination string for parsing
+            val potentialDestinationStringProcessed = preprocessText(potentialDestinationStringRaw)
+
+            var detectedNavigationTarget: String? = null
+            var needsNearestBathroom = false
+            var needsNearestExit = false
+
+            if (potentialDestinationStringProcessed.isNotBlank()) {
+                // Try parsing specific location FIRST using the PROCESSED string
+                detectedNavigationTarget = parseLocationName(potentialDestinationStringProcessed)
+
+                // If specific parse failed, check RAW string for general keywords as fallback
+                if (detectedNavigationTarget == null) {
+                    // Use the raw extracted string (lowercase) for keyword check
+                    val destLowerRaw = potentialDestinationStringRaw.lowercase(Locale.ROOT)
+                    if (bathroomKeywords.any { destLowerRaw.contains(it) || isFuzzyMatchAny(potentialDestinationStringRaw, bathroomKeywords) }) {
+                        needsNearestBathroom = true
+                    } else if (exitKeywords.any { destLowerRaw.contains(it) || isFuzzyMatchAny(potentialDestinationStringRaw, exitKeywords) }) {
+                        needsNearestExit = true
+                    }
                 }
-                return LLMResponse.ClarificationNeeded("Okay, I can help you get to ${targetNameFeedback}. But first, where are you right now?")
+
+                // Handle "my gate" separately (check the processed string for consistency)
+                if (potentialDestinationStringProcessed.contains("my gate")) {
+                    if (currentState.userFlightGate != null) {
+                        detectedNavigationTarget = currentState.userFlightGate
+                        needsNearestBathroom = false
+                        needsNearestExit = false
+                    } else {
+                        detectedNavigationTarget = null
+                        needsNearestBathroom = false
+                        needsNearestExit = false
+                    }
+                }
             }
-        }
-        // Handle case where nav trigger found, target was "my gate", but gate unknown
-        if (navigationTrigger != null && effectiveNavigationTarget == null && (potentialDestinationString?.lowercase(Locale.ROOT)?.contains("my gate") == true || inputLower.contains("my gate"))) {
-            return LLMResponse.ClarificationNeeded("I need your gate number to give directions. Which gate are you looking for?")
-        }
 
-        // 5. Handle Location Update (Only if no higher priority intent was actionable AND not arrival)
-        if (detectedLocationUpdate != null) {
-            // Removed FunctionCallWithFollowUp, just call the function.
-            return LLMResponse.FunctionCall("updateLocation", mapOf("locationName" to detectedLocationUpdate))
-        }
+            // Determine the final target
+            val effectiveNavigationTarget = when {
+                detectedNavigationTarget != null -> detectedNavigationTarget
+                needsNearestBathroom -> "BATHROOM"
+                needsNearestExit -> "EMERGENCY_EXIT"
+                else -> null
+            }
 
-        // 6. Handle Confused Navigation (if no other action taken)
-        if (detectedConfusedNavigation) {
+            // Handle Navigation Action
+            if (effectiveNavigationTarget != null) {
+                if (currentState.currentKnownLocationId != null) {
+                    return LLMResponse.FunctionCall("findPath", mapOf("destinationName" to effectiveNavigationTarget))
+                } else {
+                    val targetNameFeedback = when(effectiveNavigationTarget) {
+                        "BATHROOM" -> "the nearest bathroom"
+                        "EMERGENCY_EXIT" -> "the nearest emergency exit"
+                        currentState.userFlightGate -> "your gate ($effectiveNavigationTarget)"
+                        else -> "'${effectiveNavigationTarget}'" // Show canonical name
+                    }
+                    return LLMResponse.ClarificationNeeded("Okay, I can help you get to ${targetNameFeedback}. But first, where are you right now? Please tell me your location using 'I am at...'")
+                }
+            } else {
+                // Target not identified, provide clarification using the ORIGINAL raw string
+                if (potentialDestinationStringRaw.lowercase(Locale.ROOT).contains("my gate") && currentState.userFlightGate == null) {
+                    return LLMResponse.ClarificationNeeded("I need your gate number to give directions. Which gate are you looking for?")
+                } else if (potentialDestinationStringRaw.isNotBlank()) {
+                    return LLMResponse.ClarificationNeeded("Sorry, I couldn't clearly identify '${potentialDestinationStringRaw}' as a known location like 'Gate A1', 'Bathroom 2', 'Second floor exit', 'Duty Free Shop', or 'VIP Lounge'. Could you try rephrasing?")
+                } else {
+                    return LLMResponse.ClarificationNeeded("Sorry, where exactly do you want to go? Please mention a gate, shop, or known area after '$navigationTrigger'.")
+                }
+            }
+        } // End Navigation Trigger Handling
+
+        // 4. Check for Location Update trigger (only if no navigation trigger was detected)
+        val locationTrigger = findTrigger(originalInputLower, locationUpdateTriggers)
+        if (locationTrigger != null) {
+            // Extract raw location text from ORIGINAL input
+            val triggerStartIndex = originalInputLower.indexOf(locationTrigger) // Use original case index
+            val locationTriggerEndIndex = triggerStartIndex + locationTrigger.length
+            var rawLocationText = userInput.substring(locationTriggerEndIndex).trimStart()
+            rawLocationText = rawLocationText.removePrefix(":").trimStart()
+            val potentialLocationStringRaw = rawLocationText.replace(Regex("[.,!?]$"), "").trim()
+
+            // Pre-process for parsing
+            val potentialLocationStringProcessed = preprocessText(potentialLocationStringRaw)
+
+            // Try parsing location using PROCESSED string
+            val detectedLocationUpdate = parseLocationName(potentialLocationStringProcessed)
+
+            if (detectedLocationUpdate != null) {
+                val currentDestination = currentState.currentDestinationId
+                if (currentDestination != null && detectedLocationUpdate == currentDestination) {
+                    return LLMResponse.GeneralResponse("Looks like you've arrived at your destination: ${detectedLocationUpdate}!")
+                } else {
+                    return LLMResponse.FunctionCall("updateLocation", mapOf("locationName" to detectedLocationUpdate))
+                }
+            } else {
+                // Clarification uses the ORIGINAL raw string
+                if (potentialLocationStringRaw.isNotBlank()){
+                    return LLMResponse.ClarificationNeeded("Sorry, I heard you mention your location after '$locationTrigger', but couldn't identify '${potentialLocationStringRaw}' as a specific place like 'Main Entrance', 'Security Checkpoint 1', 'Duty Free Shop', 'VIP Lounge', 'Bathroom 1', or 'Exit North'. Where exactly are you?")
+                } else {
+                    return LLMResponse.ClarificationNeeded("Sorry, I heard you mention your location after '$locationTrigger', but couldn't identify the specific place. Where exactly are you?")
+                }
+            }
+        } // End Location Update Trigger Handling
+
+        // 5. Check for Confused Navigation trigger
+        if (confusedNavigationTriggers.any { originalInputLower.contains(it) }) {
             if (currentState.currentKnownLocationId == null) {
                 return LLMResponse.ClarificationNeeded("I can try to help, but I need to know where you are first. Can you tell me your current location or landmark?")
             }
@@ -240,32 +320,18 @@ class MockLlmService {
                             "Otherwise, common next steps are check-in desks or the security checkpoint."
                 )
             }
-        }
+        } // End Confused Navigation Handling
 
-        // 7. Fallback (Refined based on partial detections)
-        if (navigationTrigger != null && effectiveNavigationTarget == null && !(potentialDestinationString?.lowercase(Locale.ROOT)?.contains("my gate") == true || inputLower.contains("my gate"))) {
-            // Nav trigger found, but target not parsed/identified (and wasn't 'my gate')
-            val potentialDest = potentialDestinationString ?: extractPotentialDestination(inputLower, navigationTriggers, navigationTrigger) // Fallback extraction
-            if (!potentialDest.isNullOrBlank()) {
-                return LLMResponse.ClarificationNeeded("Sorry, I couldn't clearly identify '$potentialDest' as a known destination or area. Could you try rephrasing or specifying a gate, shop, or area like 'Security Checkpoint 1' or 'Duty Free'?")
-            } else {
-                return LLMResponse.ClarificationNeeded("Sorry, where exactly do you want to go? Please mention a gate, shop, or known area.")
-            }
-        }
-        if (locationTrigger != null && detectedLocationUpdate == null) {
-            // Loc trigger found, but location not parsed
-            return LLMResponse.ClarificationNeeded("Sorry, I heard you mention your location, but couldn't identify the specific place. Where exactly are you?")
-        }
-
-        // Generic fallback
+        // 6. Fallback
         return LLMResponse.GeneralResponse(
             "Sorry, I didn't quite understand that. You can ask me things like:\n" +
-                    "  - 'Where is Gate C5?'\n" +
-                    "  - 'Take me to the nearest restroom.'\n" +
-                    "  - 'I am near the duty free shop and want to go to Gate A1.'\n" +
+                    "  - 'Where is Gate A1?'\n" +
+                    "  - 'Take me to Bathroom 2.'\n" +
+                    "  - 'Directions to the second floor exit.'\n" +
+                    "  - 'I am at the VIP Lounge.'\n" +
                     "  - 'How far is my gate?'\n" +
                     "  - 'I'm lost.'\n" +
-                    "  - 'I don't know where to go.'"
+                    "  - 'I don't know where to go.'" // Removed examples with concepts not in the map
         )
     } // End processUserInput
 
@@ -273,95 +339,110 @@ class MockLlmService {
     // --- Helper Functions ---
 
     private fun findTrigger(input: String, triggers: Set<String>): String? {
-        // Find the longest trigger that is present
+        // Find the longest trigger that is present (case-insensitive via inputLower)
         return triggers.filter { input.contains(it) }
             .maxByOrNull { it.length }
     }
 
-    // extractPotentialDestination - Revised to be simpler as main logic uses direct substring now
-    // This might only be useful for fallback clarification now.
-    private fun extractPotentialDestination(inputLower: String, triggers: Set<String>, usedTrigger: String): String? {
-        val textAfterTrigger = inputLower.substringAfter(usedTrigger, "").trim()
-        if (textAfterTrigger.isNotBlank()) {
-            val potential = textAfterTrigger.replace(Regex("[.,!?]"), "").trim()
-            if (potential.isNotBlank() && potential.length > 1) return potential.ifEmpty { null }
-        }
-        return null
-    }
+    // *** MODIFIED: Assumes input 'processedLocationText' is already pre-processed (lowercase, ordinals->digits) ***
+    private fun parseLocationName(processedLocationText: String): String? {
+        if (processedLocationText.isBlank()) return null
+        // Input is already processed (lowercase, ordinals replaced by digits)
 
-    private fun parseLocationName(rawLocation: String): String? {
-        if (rawLocation.isBlank()) return null
-        val inputClean = rawLocation.replace(Regex("[.,!?]$"), "").trim() // Clean input once
-        val inputLower = inputClean.lowercase(Locale.ROOT)
-        if (inputLower.isBlank()) return null
-
-
-        // 1. Check for Gate pattern
-        gateRegex.find(inputLower)?.let { match ->
-            return "Gate ${match.groupValues[1].uppercase()}${match.groupValues[2]}"
+        // 1. Check for Gate pattern first (requires "gate")
+        gateRegex.find(processedLocationText)?.let { match ->
+            val letter = match.groupValues[1].uppercase()
+            val number = match.groupValues[2]
+            return "Gate $letter$number" // Canonical format
         }
 
-        // 2. Check for Exact Matches in Known Locations (prioritize longer matches)
+        // 2. Check for Exact Matches in Known Locations (longest match first)
+        // Match the pre-processed input against the knownLocations keys
         val exactMatchKeyword = knownLocations.keys
-            .filter { inputLower.contains(it) }
+            .filter { processedLocationText.contains(it) } // Direct contains check on processed text
             .maxByOrNull { it.length }
 
         if (exactMatchKeyword != null) {
-            val canonical = knownLocations[exactMatchKeyword]!!
-            val requiresNumber = locationsExpectingNumbers.contains(canonical)
+            val canonicalName = knownLocations[exactMatchKeyword]!!
+            var baseNameForNumberCheck: String? = null
+            var requiresNumber = false
+            // Check if the BASE TYPE expects a number (e.g. "Security Checkpoint")
+            for (base in locationsExpectingNumbers) { // locationsExpectingNumbers is now just {"Security Checkpoint"}
+                if (canonicalName.startsWith(base, ignoreCase = true)) {
+                    baseNameForNumberCheck = base
+                    requiresNumber = true
+                    break
+                }
+                if (knownLocations[exactMatchKeyword]?.startsWith(base, ignoreCase = true) == true) {
+                    baseNameForNumberCheck = base
+                    requiresNumber = true
+                }
+            }
 
-            if (requiresNumber) {
-                // More careful number extraction: look for number AFTER the keyword match IN inputLower
-                val keywordEndIndex = inputLower.indexOf(exactMatchKeyword) + exactMatchKeyword.length
-                val textAfterKeyword = inputLower.substring(keywordEndIndex).trimStart()
+            if (requiresNumber && baseNameForNumberCheck != null) {
+                // Look for number AFTER the keyword match IN THE PROCESSED INPUT
+                val keywordEndIndex = processedLocationText.indexOf(exactMatchKeyword) + exactMatchKeyword.length
+                val textAfterKeyword = processedLocationText.substring(keywordEndIndex).trimStart()
 
+                // Use the simple numberPattern (digits/number words)
                 numberPattern.find(textAfterKeyword)?.let { numMatch ->
-                    val numVal = numMatch.groupValues[1]
-                    val numDigit = numberWords[numVal] ?: numVal
-                    // Check if number appears immediately after keyword (allow minor chars like space, dash)
-                    if (textAfterKeyword.startsWith(numVal) || textAfterKeyword.startsWith(numDigit) || textAfterKeyword.startsWith("-$numVal") || textAfterKeyword.startsWith(" $numVal")) {
-                        return "$canonical $numDigit"
+                    val numVal = numMatch.value
+                    val numDigit = numberWords[numVal] ?: numVal // Convert "one"->"1" etc.
+                    val patternStartPosition = numMatch.range.first
+                    if (patternStartPosition < 3) { // Number close to keyword
+                        // Return the BASE name + space + number
+                        return "$baseNameForNumberCheck $numDigit"
                     }
                 }
-                return null // Incomplete numbered location
-            } else {
-                // Ensure the exact match isn't just part of a different numbered location base word
-                val couldBeNumberedBase = locationsExpectingNumbers.any{ base -> canonical.startsWith(base, ignoreCase=true) && canonical != base }
-                if(couldBeNumberedBase && numberPattern.containsMatchIn(inputLower.substringAfter(exactMatchKeyword))) {
-                    return null // Ambiguous, looks like a numbered loc but number failed extraction
+                // If number required but not extracted, check if the canonical name itself IS the numbered one
+                if (canonicalName.startsWith(baseNameForNumberCheck) && canonicalName.contains(Regex("""\s\d+$"""))) {
+                    return canonicalName // Matched e.g. "security checkpoint 1" directly
+                } else {
+                    return null // Missing number for base type
                 }
-                return canonical // Matched non-numbered exactly
-            }
-        }
-
-        // 3. Check for Fuzzy Matches (using complex substring check)
-        var bestFuzzyMatchKeyword: String? = null
-        for (keyword in knownLocations.keys.sortedByDescending { it.length }) {
-            val threshold = fuzzyMatchMaxDistance + (keyword.length / 6)
-            if (isFuzzyMatch(inputLower, keyword, threshold)) { // Use the complex substring check
-                bestFuzzyMatchKeyword = keyword
-                break
-            }
-        }
-
-        if (bestFuzzyMatchKeyword != null) {
-            val canonical = knownLocations[bestFuzzyMatchKeyword]!!
-            val requiresNumber = locationsExpectingNumbers.contains(canonical)
-            if (requiresNumber) {
-                return null // Number extraction too unreliable after fuzzy match
             } else {
-                return canonical // Matched non-numbered fuzzily
+                // No number required for this type OR it's a specific mapped location
+                // (like "bathroom 2" -> "Restrooms near Gates B")
+                return canonicalName // Return the matched canonical name
             }
         }
 
-        // 4. Fallback: No known pattern/location matched.
+        // 3. Check for Fuzzy Matches (use processed input, stricter distance)
+        var bestFuzzyMatchKeyword: String? = null
+        var minFuzzyDistance = Int.MAX_VALUE
+        for (keyword in knownLocations.keys.sortedByDescending { it.length }) {
+            // Use the stricter distance
+            val threshold = fuzzyMatchMaxDistance // Now 1
+            // Fuzzy match against the processed input
+            val distance = calculateFuzzyDistanceInSubstring(processedLocationText, keyword, threshold)
+
+            if (distance != -1 && distance <= threshold) { // Check distance is within STRICT threshold
+                if (bestFuzzyMatchKeyword == null || distance < minFuzzyDistance) {
+                    // Check if this fuzzy match is for a base type expecting a number
+                    val canonicalFuzzy = knownLocations[keyword]!!
+                    val requiresNumberFuzzy = locationsExpectingNumbers.any { base -> canonicalFuzzy.startsWith(base, ignoreCase = true) }
+                    val hasNumberSuffix = canonicalFuzzy.contains(Regex("""\s\d+$"""))
+
+                    // Only accept fuzzy match if it's NOT for a base type missing a number
+                    if (!requiresNumberFuzzy || hasNumberSuffix) {
+                        minFuzzyDistance = distance
+                        bestFuzzyMatchKeyword = keyword
+                    }
+                }
+            }
+        }
+        if (bestFuzzyMatchKeyword != null) {
+            return knownLocations[bestFuzzyMatchKeyword]!!
+        }
+
+        // 4. Fallback: No match
         return null
     }
 
-    // --- Fuzzy Matching Helpers ---
 
+    // Levenshtein Distance calculation (case-insensitive)
     private fun calculateLevenshteinDistance(s1: String, s2: String): Int {
-        // Standard Levenshtein implementation
+        // (Implementation unchanged)
         val dp = Array(s1.length + 1) { IntArray(s2.length + 1) }
         for (i in 0..s1.length) {
             for (j in 0..s2.length) {
@@ -369,7 +450,7 @@ class MockLlmService {
                     i == 0 -> dp[i][j] = j
                     j == 0 -> dp[i][j] = i
                     else -> {
-                        val cost = if (s1[i - 1].equals(s2[j - 1], ignoreCase = true)) 0 else 1 // Case-insensitive cost
+                        val cost = if (s1[i - 1].equals(s2[j - 1], ignoreCase = true)) 0 else 1
                         dp[i][j] = min(min(dp[i - 1][j] + 1, dp[i][j - 1] + 1), dp[i - 1][j - 1] + cost)
                     }
                 }
@@ -378,42 +459,52 @@ class MockLlmService {
         return dp[s1.length][s2.length]
     }
 
-    /** Complex fuzzy match: Checks if the keyword fuzzy matches any relevant substring of the input */
-    private fun isFuzzyMatch(input: String, keyword: String, maxDistance: Int): Boolean {
-        if (keyword.length <= 2) return input.contains(keyword, ignoreCase = true) // Exact match for short keywords
-        if (input.length < keyword.length - maxDistance) return false // Input significantly shorter
+    // Fuzzy substring check, returns distance or -1
+    private fun calculateFuzzyDistanceInSubstring(input: String, keyword: String, maxDistance: Int): Int {
+        // (Implementation unchanged)
+        if (keyword.length <= 2) return if (input.contains(keyword, ignoreCase = true)) 0 else -1
+        // Optimization: If keyword itself is much shorter than maxDistance allows, simple contains might be enough? No, stick to Levenshtein.
+        if (input.length < keyword.length - maxDistance) return -1
 
+        var bestDist = -1
         val minSubLen = (keyword.length - maxDistance).coerceAtLeast(1)
-        val maxSubLen = keyword.length + maxDistance
+        // Allow substring length to vary slightly around keyword length
+        val maxSubLen = (keyword.length + maxDistance).coerceAtMost(input.length)
 
-        for (i in 0 until input.length) {
-            for (len in minSubLen..maxSubLen) {
-                if (i + len > input.length) break
+        for (i in 0..input.length - minSubLen) {
+            val currentMaxLen = (maxSubLen).coerceAtMost(input.length - i)
+            if (minSubLen > currentMaxLen) continue
 
+            for (len in minSubLen..currentMaxLen) {
                 val sub = input.substring(i, i + len)
-                val effectiveMaxDist = maxDistance + abs(sub.length - keyword.length) / 2 // Allow less deviation based on length diff
+                // Allow less deviation for length differences with stricter matching
+                // Let's just use the raw maxDistance threshold here for simplicity with dist=1
+                // val effectiveMaxDist = maxDistance // Simpler threshold = 1
 
-                if (calculateLevenshteinDistance(sub, keyword) <= effectiveMaxDist) {
-                    // Basic Boundary Check: Try to avoid matching mid-word
+                val dist = calculateLevenshteinDistance(sub, keyword)
+                if (dist <= maxDistance) { // Use the strict maxDistance (1)
                     val startOk = (i == 0) || !input[i - 1].isLetterOrDigit()
                     val endOk = (i + len == input.length) || !input[i + len].isLetterOrDigit()
-                    if (startOk && endOk) {
-                        return true
+                    if (startOk && endOk) { // Only accept if whole word matches (boundaries ok)
+                        if (bestDist == -1 || dist < bestDist) {
+                            bestDist = dist
+                        }
                     }
-                    // If no boundary match, still consider it a potential match for now (less strict)
-                    // return true // Uncomment for less strict matching
                 }
             }
         }
-        return false
+        // Return distance only if found AND within the strict threshold
+        return if (bestDist != -1 && bestDist <= maxDistance) bestDist else -1
     }
 
-    /** Checks if the input string fuzzy matches any of the keywords in the set */
-    private fun isFuzzyMatchAny(input: String, keywords: Set<String>): Boolean {
-        if (input.isBlank()) return false
+    // Checks if RAW input fuzzy matches any general keyword in the set (for nearest fallback)
+    private fun isFuzzyMatchAny(rawInput: String, keywords: Set<String>): Boolean {
+        if (rawInput.isBlank()) return false
+        val inputLower = rawInput.lowercase(Locale.ROOT)
         return keywords.any { keyword ->
-            val threshold = fuzzyMatchMaxDistance + (keyword.length / 6)
-            isFuzzyMatch(input, keyword, threshold) // Use complex substring check
+            // Use the strict fuzzy distance (1) here too for consistency? Yes.
+            val threshold = fuzzyMatchMaxDistance
+            calculateFuzzyDistanceInSubstring(inputLower, keyword, threshold) != -1
         }
     }
     // --- End of Helper Functions ---
