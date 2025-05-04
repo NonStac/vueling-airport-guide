@@ -79,6 +79,7 @@ fun AirportGuideTheme(
             val context = LocalContext.current
             if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         }
+
         darkTheme -> DarkColorScheme
         else -> LightColorScheme
     }
@@ -87,7 +88,8 @@ fun AirportGuideTheme(
         SideEffect {
             val window = (view.context as Activity).window
             window.statusBarColor = colorScheme.primary.toArgb() // Or Background
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme // Adjust based on status bar color
+            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars =
+                !darkTheme // Adjust based on status bar color
         }
     }
 

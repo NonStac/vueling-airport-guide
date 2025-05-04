@@ -58,7 +58,8 @@ fun MapCanvas(
     val clickRadiusBasePx = remember(nodeRadiusPx, highlightedRadiusPx) {
         max(nodeRadiusPx, highlightedRadiusPx) * CLICK_RADIUS_MULTIPLIER
     }
-    val highlightedBorderWidthPx = remember(density) { with(density) { HIGHLIGHTED_BORDER_WIDTH.toPx() } }
+    val highlightedBorderWidthPx =
+        remember(density) { with(density) { HIGHLIGHTED_BORDER_WIDTH.toPx() } }
 
     // --- Moved Calculations Outside DrawScope ---
     // Calculate floorEdges using remember in the Composable scope
@@ -87,7 +88,14 @@ fun MapCanvas(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface)
             .onSizeChanged { canvasSize = it }
-            .pointerInput(floorNodes, canvasSize, nodesById, currentFloor, map, onNodeClick) { // Update dependencies
+            .pointerInput(
+                floorNodes,
+                canvasSize,
+                nodesById,
+                currentFloor,
+                map,
+                onNodeClick
+            ) { // Update dependencies
                 detectTapGestures(
                     onTap = { clickOffset ->
                         // Keep floorNodes read from the outer scope
@@ -202,7 +210,7 @@ fun MapCanvas(
         if (!floorPath.isNullOrEmpty() && floorPath.size >= 2) {
             for (i in 0 until floorPath.size - 1) {
                 val pathNode1 = floorPath[i]
-                val pathNode2 = floorPath[i+1]
+                val pathNode2 = floorPath[i + 1]
                 val edgeInfo = map.edges.find { // map from outer scope
                     (it.from == pathNode1.id && it.to == pathNode2.id) || (it.from == pathNode2.id && it.to == pathNode1.id)
                 }
@@ -255,7 +263,11 @@ fun MapCanvas(
             )
 
             // Draw special icons using the color fetched outside DrawScope
-            if (node.name.contains("Stairs", ignoreCase = true) || node.name.contains("Elevator", ignoreCase = true)) {
+            if (node.name.contains("Stairs", ignoreCase = true) || node.name.contains(
+                    "Elevator",
+                    ignoreCase = true
+                )
+            ) {
                 drawCircle(
                     color = specialIconColor, // Use the pre-fetched color
                     radius = nodeRadiusPx * 0.4f,
@@ -263,15 +275,7 @@ fun MapCanvas(
                 )
             }
         }
-
-        // --- Draw Blackout Overlay ---
-        if (isBlackout) {
-            drawRect(
-                color = BlackoutOverlay,
-                size = size
-            )
-        }
-    } // End of DrawScope
+    }
 }
 
 // Helper function remains the same
