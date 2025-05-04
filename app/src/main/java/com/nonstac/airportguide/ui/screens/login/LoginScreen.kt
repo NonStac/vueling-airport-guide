@@ -1,6 +1,8 @@
 package com.nonstac.airportguide.ui.screens.login
 
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Flight
@@ -10,15 +12,18 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nonstac.airportguide.ui.theme.VuelingDarkGray
 import com.nonstac.airportguide.ui.theme.VuelingYellow
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -30,6 +35,10 @@ fun LoginScreen(
 ) {
     val uiState by loginViewModel.uiState.collectAsStateWithLifecycle()
     var passwordVisible by remember { mutableStateOf(false) }
+
+    val localFocusManager = LocalFocusManager.current
+
+    val keyboardController = LocalSoftwareKeyboardController.current
 
     // Effect to navigate on success
     LaunchedEffect(uiState.loginSuccess) {
@@ -55,7 +64,13 @@ fun LoginScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .padding(horizontal = 32.dp),
+                .padding(horizontal = 32.dp)
+                .pointerInput(Unit) {
+                    detectTapGestures {
+                        localFocusManager.clearFocus()
+                        keyboardController?.hide()
+                    }
+                },
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -84,7 +99,8 @@ fun LoginScreen(
                 label = { Text("Username") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
-                isError = uiState.errorMessage != null
+                isError = uiState.errorMessage != null,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
             )
             Spacer(modifier = Modifier.height(16.dp))
 
@@ -97,7 +113,8 @@ fun LoginScreen(
                 visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                 trailingIcon = {
-                    val image = if (passwordVisible) Icons.Filled.Visibility else Icons.Filled.VisibilityOff
+                    val image =
+                        if (passwordVisible) Icons.Filled.Visibility else Icons.Filled.VisibilityOff
                     val description = if (passwordVisible) "Hide password" else "Show password"
                     IconButton(onClick = { passwordVisible = !passwordVisible }) {
                         Icon(imageVector = image, description)
@@ -111,10 +128,17 @@ fun LoginScreen(
                 onClick = { loginViewModel.login() },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !uiState.isLoading,
-                colors = ButtonDefaults.buttonColors(containerColor = VuelingYellow, contentColor = VuelingDarkGray)
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = VuelingYellow,
+                    contentColor = VuelingDarkGray
+                )
             ) {
                 if (uiState.isLoading) {
-                    CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary)
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.primary
+                    )
                 } else {
                     Text("Login", color = VuelingDarkGray)
                 }
