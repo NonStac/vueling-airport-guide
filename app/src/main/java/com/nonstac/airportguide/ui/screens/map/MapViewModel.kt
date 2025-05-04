@@ -16,6 +16,7 @@ import com.nonstac.airportguide.data.repository.MockTicketRepository
 import com.nonstac.airportguide.data.repository.TicketRepository
 import com.nonstac.airportguide.service.*
 import com.nonstac.airportguide.util.*
+import com.nonstac.airportguide.util.Constants
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -42,6 +43,13 @@ data class MapUiState(
         Manifest.permission.RECORD_AUDIO to false
     ),
     val selectedNodeInfo: Node? = null,
+
+    val selectedMapId: String = Constants.DEFAULT_MAP_ID,
+    val availableMaps: List<Pair<String, String>> = listOf(
+        Constants.MAP_ID_BCN_T1 to "BCN T1",
+        Constants.MAP_ID_JFK_T4 to "JFK T4"
+    ),
+    val currentMapDisplayName: String = "Loading Map...",
 
     val selectableNodes: List<Node> = emptyList(),
     val selectedSourceNodeId: String? = null,
@@ -72,7 +80,8 @@ class MapViewModel(
 
     init {
         Log.d(TAG, "Initializing for user: $username")
-        loadInitialData()
+        loadMapData(uiState.value.selectedMapId)
+        loadTicketData()
         observeServices()
     }
 
@@ -80,7 +89,7 @@ class MapViewModel(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoadingMap = true) }
             // Load Map
-            mapRepository.getAirportMap(Constants.DEFAULT_AIRPORT_CODE)
+            mapRepository.getAirportMap(Constants.DEFAULT_MAP_ID)
                 .onSuccess { map ->
                     Log.d(TAG, "Map loaded: ${map.airportName}")
                     mapNodesById =
@@ -110,6 +119,65 @@ class MapViewModel(
                 }.onFailure { error ->
                     Log.w(TAG, "Could not fetch user tickets/gate: ${error.message}")
                 }
+        }
+    }
+
+    private fun loadMapData(mapId: String) {
+        viewModelScope.launch {
+            Log.d(TAG, "Requesting map data for ID: $mapId")
+            val displayName = uiState.value.availableMaps.firstOrNull { it.first == mapId }?.second ?: "Unknown Map"
+
+            // Set loading state and clear old map-specific data
+            _uiState.update { currentState ->
+                currentState.copy(
+                    isLoadingMap = true,
+                    currentMapDisplayName = displayName,
+                    airportMap = null, // Clear map data
+                    // mapNodesById will be repopulated below
+                    selectableNodes = emptyList(), // Clear nodes for dropdowns
+                    currentLocationNodeId = null, // Reset location on map change
+                    destinationNodeId = null, // Reset destination
+                    currentPath = null, // Reset path
+                    selectedNodeInfo = null, // Close node info dialog
+                    currentFloor = 1, // Reset floor
+                    selectedSourceNodeId = null, // Reset dropdown selections
+                    selectedDestinationNodeId = null
+                )
+            }
+
+            mapRepository.getAirportMap(mapId)
+                .onSuccess { map ->
+                    Log.d(TAG, "Map loaded successfully: ${map.airportName}")
+                    mapNodesById = map.nodes.associateBy { node -> node.id } // Repopulate node lookup map
+                    _uiState.update { currentState ->
+                        currentState.copy(
+                            airportMap = map,
+                            isLoadingMap = false,
+                            currentMapDisplayName = map.airportName, // Use name from loaded map
+                            selectableNodes = map.nodes.sortedBy { node -> node.name } // Update selectable nodes
+                        )
+                    }
+                    // Now attempt location for the new map
+                    requestInitialLocation() // Or just let location updates handle it if running
+                }.onFailure { error ->
+                    Log.e(TAG, "Failed to load map ID: $mapId", error)
+                    _uiState.update { currentState ->
+                        currentState.copy(
+                            isLoadingMap = false,
+                            currentMapDisplayName = "Error Loading Map"
+                        )
+                    }
+                    showError("Failed to load map: ${error.message}")
+                }
+        }
+    }
+
+    // Add separate function for ticket loading if not already done
+    private fun loadTicketData() {
+        viewModelScope.launch {
+            ticketRepository.getBoughtTickets(username)
+                .onSuccess { tickets -> /* ... update userFlightGate ... */ }
+                .onFailure { error -> /* ... log error ... */ }
         }
     }
 
@@ -830,6 +898,18 @@ class MapViewModel(
         isPathActive = !uiState.value.currentPath.isNullOrEmpty()
     )
 
+    fun selectMap(newMapId: String) {
+        if (newMapId != uiState.value.selectedMapId) {
+            Log.i(TAG, "Map selection changed to: $newMapId")
+            _uiState.update { currentState ->
+                currentState.copy(selectedMapId = newMapId)
+            }
+            loadMapData(newMapId)
+        } else {
+            Log.d(TAG, "Map $newMapId already selected.")
+        }
+    }
+
     fun changeFloor(newFloor: Int) {
         val currentMap = uiState.value.airportMap ?: return
         val maxFloor = currentMap.nodes.maxOfOrNull { it.floor } ?: 1
@@ -923,8 +1003,3 @@ class MapViewModel(
     }
 }
 
-// Define constants if not already defined elsewhere
-object Constants {
-    const val DEFAULT_AIRPORT_CODE = "BCN_T1" // Example
-    const val MOCK_MAP_SCALE_FACTOR = 0.75 // Example: Steps per map unit (adjust based on your map)
-}

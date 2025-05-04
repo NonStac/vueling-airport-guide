@@ -1,5 +1,5 @@
 {
-  "airportName": "BCN Terminal 1 Mock",
+  "airportName": "BCN T1",
   "nodes": [
     {"id": "ENTRANCE", "name": "Main Entrance", "type": "ENTRANCE", "x": 50, "y": 500, "floor": 1},
     {"id": "CHECKIN_A", "name": "Check-in Area A", "type": "WAYPOINT", "x": 150, "y": 450, "floor": 1},

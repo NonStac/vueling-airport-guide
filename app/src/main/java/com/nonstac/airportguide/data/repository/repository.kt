@@ -75,14 +75,16 @@ class MockTicketRepository : TicketRepository {
     }
 }
 
+// --- MapRepository Interface (Updated) ---
 interface MapRepository {
-    suspend fun getAirportMap(airportCode: String): Result<AirportMap>
+    // Change parameter from airportCode to mapId
+    suspend fun getAirportMap(mapId: String): Result<AirportMap>
 }
 
-// Implementation uses local data source
+// --- MapRepository Implementation (Updated) ---
 class MapRepositoryImpl(private val dataSource: AirportMapDataSource) : MapRepository {
-    override suspend fun getAirportMap(airportCode: String): Result<AirportMap> {
-        // For now, always return the hardcoded map, ignoring airportCode
-        return dataSource.loadMap()
+    override suspend fun getAirportMap(mapId: String): Result<AirportMap> {
+        // Pass the mapId to the data source
+        return dataSource.loadMap(mapId)
     }
 }

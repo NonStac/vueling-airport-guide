@@ -29,6 +29,7 @@ import androidx.compose.material.icons.automirrored.filled.MenuOpen
 import com.nonstac.airportguide.ui.theme.AirportGuideTheme
 import com.nonstac.airportguide.ui.theme.OnPrimaryLight
 import com.nonstac.airportguide.ui.theme.VuelingDarkGray
+import androidx.compose.foundation.clickable
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -45,6 +46,9 @@ fun MapScreen(
     val uiState by mapViewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current // Context needed? Maybe not if PermissionsHandler is removed
     val systemInDarkTheme = isSystemInDarkTheme()
+    val TAG = "MapScreen"
+
+    var mapSelectionExpanded by remember { mutableStateOf(false) }
 
     var showDropdownPopup by remember { mutableStateOf(false) }
 
@@ -92,7 +96,61 @@ fun MapScreen(
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { Text(uiState.airportMap?.airportName ?: "Airport Map") },
+                    title = {
+                        Box {
+                            Row(
+                                modifier = Modifier.clickable(
+                                    onClick = {
+                                        Log.d(TAG, "Map title clicked, toggling dropdown.")
+                                        mapSelectionExpanded = true // Open the dropdown
+                                    },
+                                    enabled = !uiState.isLoadingMap // Disable click while map is loading
+                                ),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                // Display the current map name from the state
+                                Text(uiState.currentMapDisplayName)
+                                // Add dropdown indicator icon
+                                Icon(
+                                    Icons.Default.ArrowDropDown,
+                                    contentDescription = "Select Map",
+                                    // Optionally tint based on theme/state
+                                    // tint = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
+
+                            // --- Dropdown Menu definition ---
+                            DropdownMenu(
+                                expanded = mapSelectionExpanded,
+                                onDismissRequest = { mapSelectionExpanded = false } // Close when clicked outside
+                                // modifier = Modifier.align(Alignment.TopStart) // Adjust alignment if needed
+                            ) {
+                                Text( // Add a header to the dropdown
+                                    text = "Select Airport Map",
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                HorizontalDivider() // Use M3 Divider
+
+                                // Iterate through available maps from the state
+                                uiState.availableMaps.forEach { (mapId, displayName) ->
+                                    DropdownMenuItem(
+                                        text = { Text(displayName) },
+                                        onClick = {
+                                            Log.d(TAG,"Map selected from dropdown: $displayName ($mapId)")
+                                            mapViewModel.selectMap(mapId) // Call VM to change map
+                                            mapSelectionExpanded = false // Close dropdown after selection
+                                        },
+                                        // Highlight the currently selected map
+                                        leadingIcon = if (mapId == uiState.selectedMapId) {
+                                            { Icon(Icons.Filled.Check, contentDescription = "Selected") }
+                                        } else null
+                                    )
+                                }
+                            }
+                        }
+                    },
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = VuelingDarkGray,
                         titleContentColor = OnPrimaryLight
@@ -196,6 +254,7 @@ fun MapScreen(
             },
             snackbarHost = { SnackbarHost(hostState = mapViewModel.snackbarHostState) }
         ) { paddingValues ->
+            var mapSelectionExpanded by remember { mutableStateOf(false) }
             Box(
                 modifier = Modifier
                     .fillMaxSize()
