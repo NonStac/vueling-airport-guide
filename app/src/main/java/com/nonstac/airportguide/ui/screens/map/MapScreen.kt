@@ -30,6 +30,9 @@ import com.nonstac.airportguide.ui.theme.AirportGuideTheme
 import com.nonstac.airportguide.ui.theme.OnPrimaryLight
 import com.nonstac.airportguide.ui.theme.VuelingDarkGray
 import androidx.compose.foundation.clickable
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -305,16 +308,22 @@ fun MapScreen(
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        if (uiState.isBlackout) {
+                        if(uiState.isBlackout) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    Icons.Default.SignalWifiOff,
-                                    contentDescription = "Blackout Active",
-                                    tint = VuelingYellow
-                                )
+                                Icon(Icons.Default.SignalWifiOff, contentDescription = "Blackout Active", tint = VuelingYellow)
                                 Spacer(modifier = Modifier.width(8.dp))
+
+                                // Format the start time if available
+                                val startTimeString = remember(uiState.blackoutStartTime) {
+                                    uiState.blackoutStartTime?.let { startTime ->
+                                        // Format: HH:mm (e.g., 14:33)
+                                        val sdf = SimpleDateFormat("HH:mm", Locale.getDefault())
+                                        "(Since ${sdf.format(Date(startTime))})"
+                                    } ?: ""
+                                }
+
                                 Text(
-                                    text = "BLACKOUT MODE ACTIVE",
+                                    text = "BLACKOUT MODE ACTIVE $startTimeString",
                                     style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.Bold,
                                     color = VuelingYellow,
