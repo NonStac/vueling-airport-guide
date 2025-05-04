@@ -175,12 +175,24 @@ class MapViewModel(
         }
     }
 
-    // Add separate function for ticket loading if not already done
+    // Replace your existing loadTicketData with this complete version
     private fun loadTicketData() {
         viewModelScope.launch {
             ticketRepository.getBoughtTickets(username)
-                .onSuccess { tickets -> /* ... update userFlightGate ... */ }
-                .onFailure { error -> /* ... log error ... */ }
+                .onSuccess { tickets ->
+                    val relevantTicket = tickets.firstOrNull { it.status == TicketStatus.BOUGHT }
+                    val fetchedGate = relevantTicket?.gate
+
+                    Log.i(TAG, "loadTicketData - Found relevant ticket: ${relevantTicket?.flightNumber}, Gate: $fetchedGate")
+
+                    _uiState.update { currentState ->
+                        currentState.copy(userFlightGate = fetchedGate)
+                    }
+
+                }.onFailure { error ->
+                    Log.e(TAG, "Could not fetch user tickets/gate: ${error.message}")
+                    _uiState.update { currentState -> currentState.copy(userFlightGate = null) }
+                }
         }
     }
 
