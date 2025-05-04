@@ -125,7 +125,8 @@ class MapViewModel(
     private fun loadMapData(mapId: String) {
         viewModelScope.launch {
             Log.d(TAG, "Requesting map data for ID: $mapId")
-            val displayName = uiState.value.availableMaps.firstOrNull { it.first == mapId }?.second ?: "Unknown Map"
+            val displayName = uiState.value.availableMaps.firstOrNull { it.first == mapId }?.second
+                ?: "Unknown Map"
 
             // Set loading state and clear old map-specific data
             _uiState.update { currentState ->
@@ -148,7 +149,8 @@ class MapViewModel(
             mapRepository.getAirportMap(mapId)
                 .onSuccess { map ->
                     Log.d(TAG, "Map loaded successfully: ${map.airportName}")
-                    mapNodesById = map.nodes.associateBy { node -> node.id } // Repopulate node lookup map
+                    mapNodesById =
+                        map.nodes.associateBy { node -> node.id } // Repopulate node lookup map
                     _uiState.update { currentState ->
                         currentState.copy(
                             airportMap = map,
@@ -920,22 +922,12 @@ class MapViewModel(
             _uiState.update {
                 it.copy(
                     currentFloor = newFloor,
-                    currentPath = null,
-                    destinationNodeId = null,
-                    currentLocationNodeId = null
                 )
-            } // Reset path/location when changing floor manually? Or try to map?
-            // Resetting seems safer unless you implement cross-floor location persistence/mapping.
+            }
             updateStatus("Switched to Floor $newFloor. Tap mic if you need help.")
-            // Optionally, try to find the nearest node on the *new* floor if location is available
-            // uiState.value.currentLocation?.let { loc -> findAndSetNearestNode(loc) } // Recalculates nearest node for the *new* floor
         }
     }
-
-    data class Vec(val x: Float, val y: Float)
-
-    private fun Node.toVec(): Vec = Vec(this.x.toFloat(), this.y.toFloat())
-
+    
     private fun angleToDirection(angle: Double): String {
         // Ensure angle is within -180 to 180
         val normalizedAngle = (angle + 180.0) % 360.0 - 180.0
