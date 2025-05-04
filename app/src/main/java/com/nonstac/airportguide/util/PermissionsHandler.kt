@@ -28,6 +28,10 @@ object PermissionsHandler {
         return ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
     }
 
+    fun hasPermission(context: Context, permission: String): Boolean {
+        return ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+    }
+
     fun requestLocationPermissions(activity: Activity) {
         ActivityCompat.requestPermissions(
             activity,

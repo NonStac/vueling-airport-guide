@@ -23,7 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nonstac.airportguide.data.model.Ticket
-import com.nonstac.airportguide.data.model.TicketStatus
+import androidx.compose.material.icons.automirrored.filled.Chat
 import com.nonstac.airportguide.ui.theme.OnPrimaryLight
 import com.nonstac.airportguide.ui.theme.VuelingDarkGray
 import com.nonstac.airportguide.ui.theme.VuelingGray
@@ -35,6 +35,7 @@ import com.nonstac.airportguide.ui.theme.VuelingYellow
 fun TicketsScreen(
     username: String,
     onNavigateBack: () -> Unit,
+    onNavigateToChat: (String) -> Unit,
     ticketsViewModel: TicketsViewModel = viewModel(factory = TicketsViewModel.provideFactory(username))
 ) {
     val uiState by ticketsViewModel.uiState.collectAsStateWithLifecycle()
@@ -102,7 +103,8 @@ fun TicketsScreen(
                                 onBuyClick = {
                                     ticketsViewModel.buyTicket(ticket.id)
                                 },
-                                isBuying = uiState.isBuyingTicketId == ticket.id
+                                isBuying = uiState.isBuyingTicketId == ticket.id,
+                                onChatClick = { onNavigateToChat(ticket.id) }
                             )
                         }
                     }
@@ -145,7 +147,7 @@ fun SegmentedButtonToggle(
 
 
 @Composable
-fun TicketItem(ticket: Ticket, isAvailable: Boolean, onBuyClick: () -> Unit, isBuying: Boolean) {
+fun TicketItem(ticket: Ticket, isAvailable: Boolean, onBuyClick: () -> Unit, isBuying: Boolean, onChatClick: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
@@ -228,6 +230,7 @@ fun TicketItem(ticket: Ticket, isAvailable: Boolean, onBuyClick: () -> Unit, isB
             } else {
                 Row(
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp).fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -240,6 +243,13 @@ fun TicketItem(ticket: Ticket, isAvailable: Boolean, onBuyClick: () -> Unit, isB
                         Spacer(modifier = Modifier.width(4.dp))
                         Text("Gate: ${ticket.gate ?: "TBD"}", style = MaterialTheme.typography.bodyMedium)
                     }
+                }
+                IconButton(onClick = onChatClick) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.Chat,
+                        contentDescription = "Open Chat",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
                 }
             }
         }
