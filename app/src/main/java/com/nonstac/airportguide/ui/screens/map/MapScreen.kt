@@ -22,9 +22,11 @@ import com.nonstac.airportguide.data.model.NodeType
 import com.nonstac.airportguide.util.PermissionsHandler
 import com.nonstac.airportguide.ui.theme.VuelingYellow
 import android.util.Log
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material.icons.automirrored.filled.CompareArrows
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.automirrored.filled.MenuOpen
+import com.nonstac.airportguide.ui.theme.AirportGuideTheme
 import com.nonstac.airportguide.ui.theme.OnPrimaryLight
 import com.nonstac.airportguide.ui.theme.VuelingDarkGray
 
@@ -42,6 +44,7 @@ fun MapScreen(
 ) {
     val uiState by mapViewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current // Context needed? Maybe not if PermissionsHandler is removed
+    val systemInDarkTheme = isSystemInDarkTheme()
 
     var showDropdownPopup by remember { mutableStateOf(false) }
 
@@ -80,220 +83,232 @@ fun MapScreen(
         )
     }
 
-    // --- UI Scaffold ---
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(uiState.airportMap?.airportName ?: "Airport Map") },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = VuelingDarkGray,
-                    titleContentColor = OnPrimaryLight
-                ),
-                actions = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        val minFloor = remember(uiState.airportMap) {
-                            uiState.airportMap?.nodes?.minOfOrNull { it.floor } ?: 1
-                        }
-                        val maxFloor = remember(uiState.airportMap) {
-                            uiState.airportMap?.nodes?.maxOfOrNull { it.floor } ?: 1
-                        }
+    AirportGuideTheme(
+        darkTheme = systemInDarkTheme || uiState.isBlackout,
+        dynamicColor = false
+    ) {
 
-                        Text(
-                            "Floor: ${uiState.currentFloor}",
-                            modifier = Modifier.padding(end = 8.dp)
-                        )
-                        IconButton(
-                            onClick = { mapViewModel.changeFloor(uiState.currentFloor - 1) },
-                            enabled = uiState.currentFloor > minFloor
-                        ) {
-                            Icon(
-                                Icons.Default.ArrowDownward,
-                                contentDescription = "Go Down One Floor"
-                            )
-                        }
-                        IconButton(
-                            onClick = { mapViewModel.changeFloor(uiState.currentFloor + 1) },
-                            enabled = uiState.currentFloor < maxFloor
-                        ) {
-                            Icon(Icons.Default.ArrowUpward, contentDescription = "Go Up One Floor")
-                        }
-                    }
-                    IconButton(onClick = onNavigateToTickets) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.AirplaneTicket,
-                            contentDescription = "View Tickets"
-                        )
-                    }
-                }
-            )
-        },
-        floatingActionButton = {
-            val safePadding = WindowInsets.safeDrawing.asPaddingValues()
-
-            Column(
-                modifier = Modifier
-                    .padding(safePadding)
-                    .padding(16.dp),
-                horizontalAlignment = Alignment.End,
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                FloatingActionButton(
-                    // Set the state to true on click
-                    onClick = { showDropdownPopup = true },
-                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                ) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.MenuOpen,
-                        contentDescription = "Open Selection Popup"
-                    )
-                }
-
-                FloatingActionButton(
-                    onClick = {
-                        // Check permission directly from the ViewModel state
-                        if (uiState.permissionsGranted[Manifest.permission.RECORD_AUDIO] == true) {
-                            // Permission granted: Call the ViewModel function that stops TTS and starts ASR
-                            Log.d(
-                                "MapScreen",
-                                "FAB Clicked: Permission OK, calling interruptSpeechAndListen."
-                            )
-                            mapViewModel.interruptSpeechAndListen()
-                        } else {
-                            // Permission not granted: Launch the permission request
-                            Log.d("MapScreen", "FAB Clicked: Permission needed, launching request.")
-                            audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                        }
-                    },
-                    containerColor = VuelingYellow,
-                    contentColor = VuelingDarkGray
-                ) {
-                    if (uiState.isListening) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(24.dp),
-                            strokeWidth = 2.dp,
-                            color = VuelingDarkGray
-                        )
-                    } else {
-                        Icon(Icons.Filled.Mic, contentDescription = "Start Voice Command")
-                    }
-                }
-            }
-        },
-        snackbarHost = { SnackbarHost(hostState = mapViewModel.snackbarHostState) }
-    ) { paddingValues ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-        ) {
-            when {
-                uiState.isLoadingMap -> {
-                    CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
-                }
-
-                uiState.airportMap != null -> {
-                    MapCanvas(
-                        map = uiState.airportMap,
-                        currentLocationNodeId = uiState.currentLocationNodeId,
-                        destinationNodeId = uiState.destinationNodeId,
-                        path = uiState.currentPath,
-                        currentFloor = uiState.currentFloor,
-                        isBlackout = uiState.isBlackout,
-                        modifier = Modifier.fillMaxSize(),
-                        onNodeClick = mapViewModel::selectNode
-                    )
-                }
-
-                else -> {
-                    Text(
-                        "Could not load map data.",
-                        modifier = Modifier
-                            .align(Alignment.Center)
-                            .padding(16.dp),
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.error,
-                        textAlign = TextAlign.Center
-                    )
-                }
-            }
-
-            Card(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.92f)
-                )
-            ) {
-                Column(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    if (uiState.isBlackout) {
+        // --- UI Scaffold ---
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = { Text(uiState.airportMap?.airportName ?: "Airport Map") },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = VuelingDarkGray,
+                        titleContentColor = OnPrimaryLight
+                    ),
+                    actions = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                Icons.Default.SignalWifiOff,
-                                contentDescription = "Blackout Active",
-                                tint = VuelingYellow
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
+                            val minFloor = remember(uiState.airportMap) {
+                                uiState.airportMap?.nodes?.minOfOrNull { it.floor } ?: 1
+                            }
+                            val maxFloor = remember(uiState.airportMap) {
+                                uiState.airportMap?.nodes?.maxOfOrNull { it.floor } ?: 1
+                            }
+
                             Text(
-                                text = "BLACKOUT MODE ACTIVE",
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = VuelingYellow,
+                                "Floor: ${uiState.currentFloor}",
+                                modifier = Modifier.padding(end = 8.dp)
+                            )
+                            IconButton(
+                                onClick = { mapViewModel.changeFloor(uiState.currentFloor - 1) },
+                                enabled = uiState.currentFloor > minFloor
+                            ) {
+                                Icon(
+                                    Icons.Default.ArrowDownward,
+                                    contentDescription = "Go Down One Floor"
+                                )
+                            }
+                            IconButton(
+                                onClick = { mapViewModel.changeFloor(uiState.currentFloor + 1) },
+                                enabled = uiState.currentFloor < maxFloor
+                            ) {
+                                Icon(
+                                    Icons.Default.ArrowUpward,
+                                    contentDescription = "Go Up One Floor"
+                                )
+                            }
+                        }
+                        IconButton(onClick = onNavigateToTickets) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.AirplaneTicket,
+                                contentDescription = "View Tickets"
                             )
                         }
-                        Spacer(modifier = Modifier.height(4.dp))
                     }
-                    Text(
-                        text = uiState.statusMessage ?: "Tap the mic or a map node.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.fillMaxWidth(),
-                        textAlign = TextAlign.Center,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    // Combined processing indicator for LLM or location finding
-                    if (uiState.isProcessing || uiState.isLoadingLocation) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                )
+            },
+            floatingActionButton = {
+                val safePadding = WindowInsets.safeDrawing.asPaddingValues()
+
+                Column(
+                    modifier = Modifier
+                        .padding(safePadding)
+                        .padding(16.dp),
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FloatingActionButton(
+                        // Set the state to true on click
+                        onClick = { showDropdownPopup = true },
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.MenuOpen,
+                            contentDescription = "Open Selection Popup"
+                        )
+                    }
+
+                    FloatingActionButton(
+                        onClick = {
+                            // Check permission directly from the ViewModel state
+                            if (uiState.permissionsGranted[Manifest.permission.RECORD_AUDIO] == true) {
+                                // Permission granted: Call the ViewModel function that stops TTS and starts ASR
+                                Log.d(
+                                    "MapScreen",
+                                    "FAB Clicked: Permission OK, calling interruptSpeechAndListen."
+                                )
+                                mapViewModel.interruptSpeechAndListen()
+                            } else {
+                                // Permission not granted: Launch the permission request
+                                Log.d(
+                                    "MapScreen",
+                                    "FAB Clicked: Permission needed, launching request."
+                                )
+                                audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            }
+                        },
+                        containerColor = VuelingYellow,
+                        contentColor = VuelingDarkGray
+                    ) {
+                        if (uiState.isListening) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                                strokeWidth = 2.dp,
+                                color = VuelingDarkGray
+                            )
+                        } else {
+                            Icon(Icons.Filled.Mic, contentDescription = "Start Voice Command")
+                        }
                     }
                 }
+            },
+            snackbarHost = { SnackbarHost(hostState = mapViewModel.snackbarHostState) }
+        ) { paddingValues ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+            ) {
+                when {
+                    uiState.isLoadingMap -> {
+                        CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                    }
+
+                    uiState.airportMap != null -> {
+                        MapCanvas(
+                            map = uiState.airportMap,
+                            currentLocationNodeId = uiState.currentLocationNodeId,
+                            destinationNodeId = uiState.destinationNodeId,
+                            path = uiState.currentPath,
+                            currentFloor = uiState.currentFloor,
+                            isBlackout = uiState.isBlackout,
+                            modifier = Modifier.fillMaxSize(),
+                            onNodeClick = mapViewModel::selectNode
+                        )
+                    }
+
+                    else -> {
+                        Text(
+                            "Could not load map data.",
+                            modifier = Modifier
+                                .align(Alignment.Center)
+                                .padding(16.dp),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.error,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+
+                Card(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.92f)
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        if (uiState.isBlackout) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    Icons.Default.SignalWifiOff,
+                                    contentDescription = "Blackout Active",
+                                    tint = VuelingYellow
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "BLACKOUT MODE ACTIVE",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = VuelingYellow,
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                        }
+                        Text(
+                            text = uiState.statusMessage ?: "Tap the mic or a map node.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.fillMaxWidth(),
+                            textAlign = TextAlign.Center,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        // Combined processing indicator for LLM or location finding
+                        if (uiState.isProcessing || uiState.isLoadingLocation) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        }
+                    }
+                }
+
+                DropdownPopup(
+                    showDialog = showDropdownPopup,
+                    onDismiss = { showDropdownPopup = false },
+                    selectableNodes = uiState.selectableNodes,
+                    selectedSourceNodeId = uiState.selectedSourceNodeId,
+                    selectedDestinationNodeId = uiState.selectedDestinationNodeId,
+                    // Link actions to ViewModel functions
+                    onSourceSelected = { nodeId -> mapViewModel.updateSelectedSourceNode(nodeId) },
+                    onDestinationSelected = { nodeId ->
+                        mapViewModel.updateSelectedDestinationNode(
+                            nodeId
+                        )
+                    },
+                    onFindPathClick = { mapViewModel.triggerPathfindingFromDropdowns() }
+                )
+
+                NodeInfoDialog(
+                    node = uiState.selectedNodeInfo,
+                    onDismiss = mapViewModel::dismissNodeInfo,
+
+                    onSetCurrentNode = { node ->
+                        mapViewModel.setCurrentNodeFromDialog(node)
+                        mapViewModel.dismissNodeInfo()
+                    },
+                    onSetDestinationNode = { node ->
+                        mapViewModel.setDestinationNodeFromDialog(node)
+                        mapViewModel.dismissNodeInfo()
+                    }
+                )
+
             }
-
-            DropdownPopup(
-                showDialog = showDropdownPopup,
-                onDismiss = { showDropdownPopup = false },
-                selectableNodes = uiState.selectableNodes,
-                selectedSourceNodeId = uiState.selectedSourceNodeId,
-                selectedDestinationNodeId = uiState.selectedDestinationNodeId,
-                // Link actions to ViewModel functions
-                onSourceSelected = { nodeId -> mapViewModel.updateSelectedSourceNode(nodeId) },
-                onDestinationSelected = { nodeId ->
-                    mapViewModel.updateSelectedDestinationNode(
-                        nodeId
-                    )
-                },
-                onFindPathClick = { mapViewModel.triggerPathfindingFromDropdowns() }
-            )
-
-            NodeInfoDialog(
-                node = uiState.selectedNodeInfo,
-                onDismiss = mapViewModel::dismissNodeInfo,
-
-                onSetCurrentNode = { node ->
-                    mapViewModel.setCurrentNodeFromDialog(node)
-                    mapViewModel.dismissNodeInfo()
-                },
-                onSetDestinationNode = { node ->
-                    mapViewModel.setDestinationNodeFromDialog(node)
-                    mapViewModel.dismissNodeInfo()
-                }
-            )
-
         }
     }
 }
