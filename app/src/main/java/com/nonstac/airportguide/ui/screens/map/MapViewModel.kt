@@ -50,6 +50,7 @@ data class MapUiState(
         Constants.MAP_ID_JFK_T4 to "JFK T4"
     ),
     val currentMapDisplayName: String = "Loading Map...",
+    val blackoutStartTime: Long? = null,
 
     val selectableNodes: List<Node> = emptyList(),
     val selectedSourceNodeId: String? = null,
@@ -184,7 +185,23 @@ class MapViewModel(
     private fun observeServices() {
         // Connectivity
         connectivityService.isConnected
-            .onEach { isConnected -> _uiState.update { it.copy(isBlackout = !isConnected) } }
+            .onEach { isConnected ->
+                val wasBlackout = uiState.value.isBlackout
+                val isNowBlackout = !isConnected
+                var startTime = uiState.value.blackoutStartTime
+
+                if (isNowBlackout && !wasBlackout) {
+                    Log.i(TAG, "Blackout detected.")
+                    startTime = System.currentTimeMillis()
+                    speak("Warning: Network connection lost. Entering blackout mode.")
+                } else if (!isNowBlackout && wasBlackout) {
+                    Log.i(TAG, "Connection restored.")
+                    startTime = null
+                    speak("Network connection restored.")
+                }
+
+                _uiState.update { it.copy(isBlackout = isNowBlackout, blackoutStartTime = startTime) }
+            }
             .launchIn(viewModelScope)
 
         // ASR Listening State
